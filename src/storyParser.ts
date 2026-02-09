@@ -5,11 +5,10 @@ export interface ParsedStory {
 }
 
 export function parseStory(storyText: string): ParsedStory {
-  // Simple extraction: find quoted words and common nouns
   const entities: string[] = [];
   const actions: string[] = [];
 
-  // Extract quoted text (e.g., "shopping cart" → shopping cart)
+  // Extract quoted text
   const quotedMatches = storyText.match(/"([^"]+)"/g);
   if (quotedMatches) {
     quotedMatches.forEach((match) => {
@@ -18,20 +17,64 @@ export function parseStory(storyText: string): ParsedStory {
     });
   }
 
-  // Extract common patterns (basic NLP)
   const words = storyText.toLowerCase().split(/\s+/);
 
-  // Look for entities after "a/an/the"
-  for (let i = 0; i < words.length - 1; i++) {
-    if (["a", "an", "the"].includes(words[i])) {
-      const entity = words[i + 1].replace(/[^a-z]/g, "");
-      if (entity.length > 2) {
-        entities.push(entity);
-      }
+  // Extract all meaningful words (length > 3, not stopwords)
+  const stopwords = [
+    "a",
+    "an",
+    "the",
+    "can",
+    "should",
+    "will",
+    "would",
+    "could",
+    "as",
+    "to",
+    "from",
+    "with",
+    "and",
+    "or",
+    "but",
+    "in",
+    "on",
+    "at",
+    "by",
+    "for",
+    "of",
+    "is",
+    "are",
+    "was",
+    "were",
+    "been",
+    "be",
+    "have",
+    "has",
+    "had",
+    "do",
+    "does",
+    "did",
+    "new",
+    "old",
+  ];
+
+  for (const word of words) {
+    const cleaned = word.replace(/[^a-z]/g, "");
+
+    // Keep words that are:
+    // - Longer than 3 characters
+    // - Not stopwords
+    // - Not already in entities
+    if (
+      cleaned.length > 3 &&
+      !stopwords.includes(cleaned) &&
+      !entities.includes(cleaned)
+    ) {
+      entities.push(cleaned);
     }
   }
 
-  // Common action verbs
+  // Extract action verbs
   const actionVerbs = [
     "add",
     "remove",
@@ -50,10 +93,9 @@ export function parseStory(storyText: string): ParsedStory {
     }
   });
 
-  // Remove duplicates
   return {
     rawText: storyText,
-    entities: [...new Set(entities)],
+    entities: [...new Set(entities)], // Remove duplicates
     actions: [...new Set(actions)],
   };
 }
