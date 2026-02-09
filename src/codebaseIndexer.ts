@@ -39,6 +39,12 @@ export async function indexCodebase(
   project.addSourceFilesAtPaths([
     path.join(workspacePath, "src/**/*.ts"),
     path.join(workspacePath, "src/**/*.tsx"),
+    path.join(workspacePath, "app/**/*.ts"), // Add this
+    path.join(workspacePath, "app/**/*.tsx"), // Add this
+    path.join(workspacePath, "lib/**/*.ts"), // Common folder
+    path.join(workspacePath, "lib/**/*.tsx"),
+    path.join(workspacePath, "components/**/*.ts"), // Another common pattern
+    path.join(workspacePath, "components/**/*.tsx"),
   ]);
 
   const sourceFiles = project.getSourceFiles();
