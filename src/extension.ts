@@ -2,6 +2,8 @@
 // Import the module and reference it with the alias vscode in your code below
 import * as vscode from "vscode";
 import { indexCodebase } from "./codebaseIndexer";
+import { parseStory } from "./storyParser";
+import { searchComponents } from "./componentSearch";
 
 // This method is called when your extension is activated
 // Your extension is activated the very first time the command is executed
@@ -16,9 +18,19 @@ export function activate(context: vscode.ExtensionContext) {
   const disposable = vscode.commands.registerCommand(
     "storytotest.helloWorld",
     async () => {
-      // The code you place here will be executed every time your command is executed
-      // Display a message box to the user
-      vscode.window.showInformationMessage("Hello World from storytotest!");
+      // gets the user story from the input box shown to the user
+      const userStory = await vscode.window.showInputBox({
+        prompt: "Paste your user story here",
+        placeHolder: "As a user, I can add items to my shopping cart",
+        ignoreFocusOut: true,
+      });
+
+      if (!userStory) {
+        vscode.window.showInformationMessage("No user story provided.");
+        return;
+      }
+
+      // get workspace
       const workspaceFolders = vscode.workspace.workspaceFolders;
 
       if (!workspaceFolders) {
@@ -29,22 +41,41 @@ export function activate(context: vscode.ExtensionContext) {
       const workspacePath = workspaceFolders[0].uri.fsPath;
       console.log(`workspace path: ${workspacePath}`);
 
-      // progress while indexing
+      // index codebase and search
       await vscode.window.withProgress(
         {
           location: vscode.ProgressLocation.Notification,
-          title: "Indexing codebase...",
+          title: "Generating tests...",
           cancellable: false,
         },
-        async () => {
+        async (progress) => {
           try {
+            progress.report({ message: "Indexing codebase..." });
             const index = await indexCodebase(workspacePath);
+
+            // parse story for entities and actions
+            progress.report({ message: "Parsing story..." });
+            const parsed = parseStory(userStory);
+
+            console.log("=== PARSED STORY ===");
+            console.log("Entities: ", parsed.entities);
+            console.log("Actions: ", parsed.actions);
+
+            // search index for matching components
+            progress.report({ message: "Searching for components..." });
+            const searchResults = searchComponents(index, parsed.entities);
+
+            console.log("=== SEARCH RESULTS ===");
+            console.log(
+              "Matched interfaces: ",
+              searchResults.matchedInterfaces,
+            );
+            console.log("Matched classes: ", searchResults.matchedClasses);
 
             // results
             const message = `Found ${index.interfaces.length} interfaces and ${index.classes.length} classes`;
             vscode.window.showInformationMessage(message);
 
-            // log info to debug console
             console.log("=== INDEXING RESULTS ===");
             console.log("Interfaces: ", index.interfaces);
             console.log("Classes:", index.classes);
