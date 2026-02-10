@@ -10,13 +10,13 @@
     "Other"
   ],
   "activationEvents": [
-    "onCommand:storytotest.helloWorld"
+    "onCommand:storytotest.generateTests"
   ],
   "main": "./out/extension.js",
   "contributes": {
     "commands": [
       {
-        "command": "storytotest.helloWorld",
+        "command": "storytotest.generateTests",
         "title": "StoryToTest: Generate Tests from User Stories"
       }
     ],
