@@ -139,6 +139,24 @@ export function activate(context: vscode.ExtensionContext) {
             console.log("=== GENERATED TEST ===");
             console.log(generatedTest.code);
 
+            // Preview the generated test and ask for confirmation
+            const previewDoc = await vscode.workspace.openTextDocument({
+              language: "typescript",
+              content: generatedTest.code,
+            });
+            await vscode.window.showTextDocument(previewDoc, { preview: true });
+
+            const choice = await vscode.window.showInformationMessage(
+              `Preview generated test: ${generatedTest.fileName}. Save to __tests__?`,
+              { modal: false },
+              "Accept & Save",
+              "Cancel",
+            );
+
+            if (choice !== "Accept & Save") {
+              return;
+            }
+
             // Create __tests__ directory if it doesn't exist
             if (!fs.existsSync(testDir)) {
               fs.mkdirSync(testDir, { recursive: true });
