@@ -10,7 +10,7 @@ export function activate(context: vscode.ExtensionContext) {
   console.log("StoryToTest is now active");
 
   const disposable = vscode.commands.registerCommand(
-    "storytotest.helloWorld",
+    "storytotest.generateTests",
     async () => {
       // Get user story from input box
       const userStory = await vscode.window.showInputBox({
@@ -32,6 +32,21 @@ export function activate(context: vscode.ExtensionContext) {
       }
 
       const workspacePath = workspaceFolders[0].uri.fsPath;
+
+      // Verify this looks like a TypeScript workspace
+      const hasTsConfig = fs.existsSync(path.join(workspacePath, "tsconfig.json"));
+      const tsFiles = await vscode.workspace.findFiles(
+        "**/*.{ts,tsx}",
+        "**/{node_modules,out}/**",
+        1,
+      );
+
+      if (!hasTsConfig && tsFiles.length === 0) {
+        vscode.window.showErrorMessage(
+          "StoryToTest requires a TypeScript workspace (tsconfig.json or .ts/.tsx files).",
+        );
+        return;
+      }
 
       // Index, search, and generate
       await vscode.window.withProgress(
