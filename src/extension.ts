@@ -150,10 +150,47 @@ export function activate(context: vscode.ExtensionContext) {
               `Preview generated test: ${generatedTest.fileName}. Save to __tests__?`,
               { modal: false },
               "Accept & Save",
+              "Regenerate",
               "Cancel",
             );
 
-            if (choice !== "Accept & Save") {
+            if (choice === "Regenerate") {
+              // Rerun generation once with the same context
+              const regenerated = await generateTest(
+                apiKey,
+                userStory,
+                searchResults.matchedInterfaces,
+                searchResults.matchedClasses,
+                testDir,
+                framework,
+                imports,
+                model,
+              );
+
+              // Replace preview content
+              const edit = new vscode.WorkspaceEdit();
+              const fullRange = new vscode.Range(
+                previewDoc.positionAt(0),
+                previewDoc.positionAt(previewDoc.getText().length),
+              );
+              edit.replace(previewDoc.uri, fullRange, regenerated.code);
+              await vscode.workspace.applyEdit(edit);
+
+              // Re-show confirmation
+              const confirm = await vscode.window.showInformationMessage(
+                `Regenerated test: ${regenerated.fileName}. Save to __tests__?`,
+                { modal: false },
+                "Accept & Save",
+                "Cancel",
+              );
+
+              if (confirm !== "Accept & Save") {
+                return;
+              }
+
+              generatedTest.code = regenerated.code;
+              generatedTest.fileName = regenerated.fileName;
+            } else if (choice !== "Accept & Save") {
               return;
             }
 
