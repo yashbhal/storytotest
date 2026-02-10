@@ -118,11 +118,14 @@ export function activate(context: vscode.ExtensionContext) {
 
             // Generate test
             progress.report({ message: "Generating test..." });
+            const testDir = path.join(workspacePath, "__tests__");
+
             const generatedTest = await generateTest(
               apiKey,
               userStory,
               searchResults.matchedInterfaces,
               searchResults.matchedClasses,
+              testDir,
               model,
             );
 
@@ -130,7 +133,6 @@ export function activate(context: vscode.ExtensionContext) {
             console.log(generatedTest.code);
 
             // Create __tests__ directory if it doesn't exist
-            const testDir = path.join(workspacePath, "__tests__");
             if (!fs.existsSync(testDir)) {
               fs.mkdirSync(testDir, { recursive: true });
             }

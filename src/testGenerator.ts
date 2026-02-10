@@ -1,5 +1,6 @@
 import OpenAI from "openai";
 import { InterfaceInfo, ClassInfo } from "./codebaseIndexer";
+import { resolveImport } from "./importResolver";
 
 export interface GeneratedTest {
   code: string;
@@ -11,9 +12,14 @@ export async function generateTest(
   story: string,
   matchedInterfaces: InterfaceInfo[],
   matchedClasses: ClassInfo[],
+  testDir: string,
   model: string = "gpt-4-turbo",
 ): Promise<GeneratedTest> {
   const openai = new OpenAI({ apiKey });
+
+  const importStatements = matchedInterfaces
+    .map((iface) => resolveImport(iface, testDir))
+    .join("\n");
 
   // Build context from matched interfaces with file paths
   const interfaceContext = matchedInterfaces
@@ -74,6 +80,7 @@ ${classContext ? `\n## Relevant Classes\n\n${classContext}` : ""}
 ## Generate a complete test file with:
 
 1. **Imports**: Import types from their file paths (use relative imports)
+${importStatements ? `\nUse these imports:\n${importStatements}\n` : ""}
 2. **Test Suite**: Use describe() to group related tests
 3. **Test Cases**: Use it() or test() for individual test cases
 4. **Type-Safe Data**: Create test data using the provided interfaces
