@@ -4,9 +4,174 @@ import * as fs from "fs";
 import { indexCodebase } from "./codebaseIndexer";
 import { parseStory } from "./storyParser";
 import { searchComponents } from "./componentSearch";
+import { SearchResult } from "./componentSearch";
 import { generateTest } from "./testGenerator";
-import { detectFramework } from "./frameworkDetector";
+import { detectFramework, TestFramework } from "./frameworkDetector";
 import { resolveImport } from "./importResolver";
+
+function getWorkspacePath(): string | null {
+  const workspaceFolders = vscode.workspace.workspaceFolders;
+  if (!workspaceFolders) {
+    vscode.window.showErrorMessage("No workspace folder open");
+    return null;
+  }
+  return workspaceFolders[0].uri.fsPath;
+}
+
+async function validateTypeScriptWorkspace(workspacePath: string): Promise<boolean> {
+  const hasTsConfig = fs.existsSync(path.join(workspacePath, "tsconfig.json"));
+  const tsFiles = await vscode.workspace.findFiles(
+    "**/*.{ts,tsx}",
+    "**/{node_modules,out}/**",
+    1,
+  );
+
+  if (!hasTsConfig && tsFiles.length === 0) {
+    vscode.window.showErrorMessage(
+      "StoryToTest requires a TypeScript workspace (tsconfig.json or .ts/.tsx files).",
+    );
+    return false;
+  }
+  return true;
+}
+
+async function collectContext(
+  workspacePath: string,
+  userStory: string,
+  testDir: string,
+  progress: vscode.Progress<{ message?: string }>,
+): Promise<{ parsed: ReturnType<typeof parseStory>; searchResults: SearchResult; imports: string[] }>
+{
+  progress.report({ message: "Indexing codebase..." });
+  const index = await indexCodebase(workspacePath);
+  console.log(
+    `Indexed: ${index.interfaces.length} interfaces, ${index.classes.length} classes`,
+  );
+
+  progress.report({ message: "Parsing story..." });
+  const parsed = parseStory(userStory);
+  console.log("=== PARSED STORY ===");
+  console.log("Entities:", parsed.entities);
+  console.log("Actions:", parsed.actions);
+
+  progress.report({ message: "Searching for components..." });
+  const searchResults = searchComponents(index, parsed.entities);
+  console.log("=== MATCHED COMPONENTS ===");
+  console.log("Interfaces:", searchResults.matchedInterfaces.map((i) => i.name));
+  console.log("Classes:", searchResults.matchedClasses.map((c) => c.name));
+
+  const imports = searchResults.matchedInterfaces.map((iface) =>
+    resolveImport(iface, testDir),
+  );
+
+  return { parsed, searchResults, imports };
+}
+
+async function generateWithPreview(
+  params: {
+    apiKey: string;
+    model: string;
+    userStory: string;
+    framework: TestFramework;
+    searchResults: SearchResult;
+    testDir: string;
+    imports: string[];
+  },
+): Promise<void> {
+  const { apiKey, model, userStory, framework, searchResults, testDir, imports } = params;
+
+  let generatedTest = await generateTest(
+    apiKey,
+    userStory,
+    searchResults.matchedInterfaces,
+    searchResults.matchedClasses,
+    testDir,
+    framework,
+    imports,
+    "",
+    model,
+  );
+
+  console.log("=== GENERATED TEST ===");
+  console.log(generatedTest.code);
+
+  // Preview the generated test and ask for confirmation
+  const previewDoc = await vscode.workspace.openTextDocument({
+    language: "typescript",
+    content: generatedTest.code,
+  });
+  await vscode.window.showTextDocument(previewDoc, { preview: true });
+
+  const choice = await vscode.window.showInformationMessage(
+    `Preview generated test: ${generatedTest.fileName}. Save to __tests__?`,
+    { modal: false },
+    "Accept & Save",
+    "Regenerate",
+    "Regenerate with more context",
+    "Cancel",
+  );
+
+  if (choice === "Regenerate" || choice === "Regenerate with more context") {
+    const extra =
+      choice === "Regenerate with more context"
+        ? await vscode.window.showInputBox({
+            prompt: "Add more guidance for the generated test",
+            placeHolder: "e.g. use React Testing Library, add edge cases for empty data",
+          })
+        : "";
+
+    const regenerated = await generateTest(
+      apiKey,
+      userStory,
+      searchResults.matchedInterfaces,
+      searchResults.matchedClasses,
+      testDir,
+      framework,
+      imports,
+      extra || "",
+      model,
+    );
+
+    const edit = new vscode.WorkspaceEdit();
+    const fullRange = new vscode.Range(
+      previewDoc.positionAt(0),
+      previewDoc.positionAt(previewDoc.getText().length),
+    );
+    edit.replace(previewDoc.uri, fullRange, regenerated.code);
+    await vscode.workspace.applyEdit(edit);
+
+    const confirm = await vscode.window.showInformationMessage(
+      `Regenerated test${extra ? " with extra context" : ""}: ${regenerated.fileName}. Save to __tests__?`,
+      { modal: false },
+      "Accept & Save",
+      "Cancel",
+    );
+
+    if (confirm !== "Accept & Save") {
+      return;
+    }
+
+    generatedTest = regenerated;
+  } else if (choice !== "Accept & Save") {
+    return;
+  }
+
+  // Create __tests__ directory if it doesn't exist
+  if (!fs.existsSync(testDir)) {
+    fs.mkdirSync(testDir, { recursive: true });
+  }
+
+  // Write the test file
+  const testFilePath = path.join(testDir, generatedTest.fileName);
+  fs.writeFileSync(testFilePath, generatedTest.code, "utf-8");
+
+  // Open the generated file in editor
+  const doc = await vscode.workspace.openTextDocument(testFilePath);
+  await vscode.window.showTextDocument(doc);
+
+  // Show success message
+  vscode.window.showInformationMessage(`Test generated: ${generatedTest.fileName}`);
+}
 
 export function activate(context: vscode.ExtensionContext) {
   console.log("StoryToTest is now active");
@@ -26,27 +191,13 @@ export function activate(context: vscode.ExtensionContext) {
         return;
       }
 
-      // Get workspace path
-      const workspaceFolders = vscode.workspace.workspaceFolders;
-      if (!workspaceFolders) {
-        vscode.window.showErrorMessage("No workspace folder open");
+      const workspacePath = getWorkspacePath();
+      if (!workspacePath) {
         return;
       }
 
-      const workspacePath = workspaceFolders[0].uri.fsPath;
-
-      // Verify this looks like a TypeScript workspace
-      const hasTsConfig = fs.existsSync(path.join(workspacePath, "tsconfig.json"));
-      const tsFiles = await vscode.workspace.findFiles(
-        "**/*.{ts,tsx}",
-        "**/{node_modules,out}/**",
-        1,
-      );
-
-      if (!hasTsConfig && tsFiles.length === 0) {
-        vscode.window.showErrorMessage(
-          "StoryToTest requires a TypeScript workspace (tsconfig.json or .ts/.tsx files).",
-        );
+      const isTypescriptProject = await validateTypeScriptWorkspace(workspacePath);
+      if (!isTypescriptProject) {
         return;
       }
 
@@ -67,34 +218,15 @@ export function activate(context: vscode.ExtensionContext) {
         },
         async (progress) => {
           try {
-            // Index the codebase
-            progress.report({ message: "Indexing codebase..." });
-            const index = await indexCodebase(workspacePath);
-            console.log(
-              `Indexed: ${index.interfaces.length} interfaces, ${index.classes.length} classes`,
+            progress.report({ message: "Collecting context..." });
+            const testDir = path.join(workspacePath, "__tests__");
+            const { searchResults, imports } = await collectContext(
+              workspacePath,
+              userStory,
+              testDir,
+              progress,
             );
 
-            // Parse the story
-            progress.report({ message: "Parsing story..." });
-            const parsed = parseStory(userStory);
-            console.log("=== PARSED STORY ===");
-            console.log("Entities:", parsed.entities);
-            console.log("Actions:", parsed.actions);
-
-            // Search for matching components
-            progress.report({ message: "Searching for components..." });
-            const searchResults = searchComponents(index, parsed.entities);
-            console.log("=== MATCHED COMPONENTS ===");
-            console.log(
-              "Interfaces:",
-              searchResults.matchedInterfaces.map((i) => i.name),
-            );
-            console.log(
-              "Classes:",
-              searchResults.matchedClasses.map((c) => c.name),
-            );
-
-            // Check if found anything
             if (
               searchResults.matchedInterfaces.length === 0 &&
               searchResults.matchedClasses.length === 0
@@ -119,138 +251,15 @@ export function activate(context: vscode.ExtensionContext) {
 
             // Generate test
             progress.report({ message: `Generating ${framework} test...` });
-            const testDir = path.join(workspacePath, "__tests__");
-
-            const imports = searchResults.matchedInterfaces.map((iface) =>
-              resolveImport(iface, testDir),
-            );
-
-            const generatedTest = await generateTest(
+            await generateWithPreview({
               apiKey,
-              userStory,
-              searchResults.matchedInterfaces,
-              searchResults.matchedClasses,
-              testDir,
-              framework,
-              imports,
               model,
-            );
-
-            console.log("=== GENERATED TEST ===");
-            console.log(generatedTest.code);
-
-            // Preview the generated test and ask for confirmation
-            const previewDoc = await vscode.workspace.openTextDocument({
-              language: "typescript",
-              content: generatedTest.code,
+              userStory,
+              framework,
+              searchResults,
+              testDir,
+              imports,
             });
-            await vscode.window.showTextDocument(previewDoc, { preview: true });
-
-            const choice = await vscode.window.showInformationMessage(
-              `Preview generated test: ${generatedTest.fileName}. Save to __tests__?`,
-              { modal: false },
-              "Accept & Save",
-              "Regenerate",
-              "Regenerate with more context",
-              "Cancel",
-            );
-
-            if (choice === "Regenerate") {
-              // Rerun generation once with the same context
-              const regenerated = await generateTest(
-                apiKey,
-                userStory,
-                searchResults.matchedInterfaces,
-                searchResults.matchedClasses,
-                testDir,
-                framework,
-                imports,
-                model,
-              );
-
-              // Replace preview content
-              const edit = new vscode.WorkspaceEdit();
-              const fullRange = new vscode.Range(
-                previewDoc.positionAt(0),
-                previewDoc.positionAt(previewDoc.getText().length),
-              );
-              edit.replace(previewDoc.uri, fullRange, regenerated.code);
-              await vscode.workspace.applyEdit(edit);
-
-              // Re-show confirmation
-              const confirm = await vscode.window.showInformationMessage(
-                `Regenerated test: ${regenerated.fileName}. Save to __tests__?`,
-                { modal: false },
-                "Accept & Save",
-                "Cancel",
-              );
-
-              if (confirm !== "Accept & Save") {
-                return;
-              }
-
-              generatedTest.code = regenerated.code;
-              generatedTest.fileName = regenerated.fileName;
-            } else if (choice === "Regenerate with more context") {
-              const extra = await vscode.window.showInputBox({
-                prompt: "Add more guidance for the generated test",
-                placeHolder: "e.g. use React Testing Library, add edge cases for empty data",
-              });
-
-              const regenerated = await generateTest(
-                apiKey,
-                userStory,
-                searchResults.matchedInterfaces,
-                searchResults.matchedClasses,
-                testDir,
-                framework,
-                imports,
-                extra || "",
-                model,
-              );
-
-              const edit = new vscode.WorkspaceEdit();
-              const fullRange = new vscode.Range(
-                previewDoc.positionAt(0),
-                previewDoc.positionAt(previewDoc.getText().length),
-              );
-              edit.replace(previewDoc.uri, fullRange, regenerated.code);
-              await vscode.workspace.applyEdit(edit);
-
-              const confirm = await vscode.window.showInformationMessage(
-                `Regenerated test with extra context: ${regenerated.fileName}. Save to __tests__?`,
-                { modal: false },
-                "Accept & Save",
-                "Cancel",
-              );
-
-              if (confirm !== "Accept & Save") {
-                return;
-              }
-
-              generatedTest.code = regenerated.code;
-              generatedTest.fileName = regenerated.fileName;
-            } else if (choice !== "Accept & Save") {
-              return;
-            }
-
-            // Create __tests__ directory if it doesn't exist
-            if (!fs.existsSync(testDir)) {
-              fs.mkdirSync(testDir, { recursive: true });
-            }
-
-            // Write the test file
-            const testFilePath = path.join(testDir, generatedTest.fileName);
-            fs.writeFileSync(testFilePath, generatedTest.code, "utf-8");
-
-            // Open the generated file in editor
-            const doc = await vscode.workspace.openTextDocument(testFilePath);
-            await vscode.window.showTextDocument(doc);
-
-            // Show success message
-            vscode.window.showInformationMessage(
-              `Test generated: ${generatedTest.fileName}`,
-            );
           } catch (error) {
             console.error("Error generating test:", error);
             vscode.window.showErrorMessage(
