@@ -130,6 +130,12 @@ ${frameworkImports ? `Framework imports (add if missing):\n${frameworkImports}\n
     code = codeMatch[1];
   }
 
+  // Prepend deterministic imports (framework + resolved interfaces)
+  const header = [frameworkImports, importStatements].filter(Boolean).join("\n");
+  if (header) {
+    code = `${header}\n\n${code}`;
+  }
+
   // Generate filename based on first matched interface or class
   let baseName = "generated";
   if (matchedInterfaces.length > 0) {
