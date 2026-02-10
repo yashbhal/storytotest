@@ -15,6 +15,7 @@ export async function generateTest(
   testDir: string,
   framework: TestFramework,
   imports: string[],
+  extraInstructions: string = "",
   model: string = "gpt-4-turbo",
 ): Promise<GeneratedTest> {
   const openai = new OpenAI({ apiKey });
@@ -96,6 +97,7 @@ ${classContext ? `\n## Relevant Classes\n\n${classContext}` : ""}
 - You may import additional types if the tests require them
 - Generate realistic test data that matches the interface properties
 - Write tests that verify the story's acceptance criteria
+${extraInstructions ? `\n- Additional guidance: ${extraInstructions}` : ""}
 
 ## Generate a complete test file with:
 

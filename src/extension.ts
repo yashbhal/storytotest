@@ -151,6 +151,7 @@ export function activate(context: vscode.ExtensionContext) {
               { modal: false },
               "Accept & Save",
               "Regenerate",
+              "Regenerate with more context",
               "Cancel",
             );
 
@@ -179,6 +180,45 @@ export function activate(context: vscode.ExtensionContext) {
               // Re-show confirmation
               const confirm = await vscode.window.showInformationMessage(
                 `Regenerated test: ${regenerated.fileName}. Save to __tests__?`,
+                { modal: false },
+                "Accept & Save",
+                "Cancel",
+              );
+
+              if (confirm !== "Accept & Save") {
+                return;
+              }
+
+              generatedTest.code = regenerated.code;
+              generatedTest.fileName = regenerated.fileName;
+            } else if (choice === "Regenerate with more context") {
+              const extra = await vscode.window.showInputBox({
+                prompt: "Add more guidance for the generated test",
+                placeHolder: "e.g. use React Testing Library, add edge cases for empty data",
+              });
+
+              const regenerated = await generateTest(
+                apiKey,
+                userStory,
+                searchResults.matchedInterfaces,
+                searchResults.matchedClasses,
+                testDir,
+                framework,
+                imports,
+                extra || "",
+                model,
+              );
+
+              const edit = new vscode.WorkspaceEdit();
+              const fullRange = new vscode.Range(
+                previewDoc.positionAt(0),
+                previewDoc.positionAt(previewDoc.getText().length),
+              );
+              edit.replace(previewDoc.uri, fullRange, regenerated.code);
+              await vscode.workspace.applyEdit(edit);
+
+              const confirm = await vscode.window.showInformationMessage(
+                `Regenerated test with extra context: ${regenerated.fileName}. Save to __tests__?`,
                 { modal: false },
                 "Accept & Save",
                 "Cancel",
