@@ -17,7 +17,28 @@
         "command": "storytotest.helloWorld",
         "title": "StoryToTest: Generate Tests from User Stories"
       }
-    ]
+    ],
+    "configuration": {
+      "title": "StoryToTest",
+      "properties": {
+        "storytotest.openaiApiKey": {
+          "type": "string",
+          "default": "",
+          "description": "OpenAI API key for test generation",
+          "markdownDescription": "Your OpenAI API key. Get one at https://platform.openai.com/api-keys"
+        },
+        "storytotest.model": {
+          "type": "string",
+          "default": "gpt-4-turbo",
+          "enum": [
+            "gpt-4-turbo",
+            "gpt-4o",
+            "gpt-4"
+          ],
+          "description": "OpenAI model to use for test generation"
+        }
+      }
+    }
   },
   "scripts": {
     "vscode:prepublish": "npm run compile",
@@ -38,6 +59,7 @@
     "typescript-eslint": "^8.54.0"
   },
   "dependencies": {
+    "openai": "^6.19.0",
     "ts-morph": "^27.0.2"
   }
 }
