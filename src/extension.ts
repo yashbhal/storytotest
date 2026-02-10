@@ -5,6 +5,7 @@ import { indexCodebase } from "./codebaseIndexer";
 import { parseStory } from "./storyParser";
 import { searchComponents } from "./componentSearch";
 import { generateTest } from "./testGenerator";
+import { detectFramework } from "./frameworkDetector";
 
 export function activate(context: vscode.ExtensionContext) {
   console.log("StoryToTest is now active");
@@ -46,6 +47,14 @@ export function activate(context: vscode.ExtensionContext) {
           "StoryToTest requires a TypeScript workspace (tsconfig.json or .ts/.tsx files).",
         );
         return;
+      }
+
+      const framework = detectFramework(workspacePath);
+      console.log(`Detected test framework: ${framework}`);
+      if (framework === "unknown") {
+        vscode.window.showWarningMessage(
+          "Test framework not detected (Jest/Vitest/Playwright). Generated tests may need manual tweaks.",
+        );
       }
 
       // Index, search, and generate
