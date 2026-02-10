@@ -126,6 +126,7 @@ export function activate(context: vscode.ExtensionContext) {
               searchResults.matchedInterfaces,
               searchResults.matchedClasses,
               testDir,
+              framework,
               model,
             );
 
