@@ -6,6 +6,7 @@ import { parseStory } from "./storyParser";
 import { searchComponents } from "./componentSearch";
 import { generateTest } from "./testGenerator";
 import { detectFramework } from "./frameworkDetector";
+import { resolveImport } from "./importResolver";
 
 export function activate(context: vscode.ExtensionContext) {
   console.log("StoryToTest is now active");
@@ -117,8 +118,12 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             // Generate test
-            progress.report({ message: "Generating test..." });
+            progress.report({ message: `Generating ${framework} test...` });
             const testDir = path.join(workspacePath, "__tests__");
+
+            const imports = searchResults.matchedInterfaces.map((iface) =>
+              resolveImport(iface, testDir),
+            );
 
             const generatedTest = await generateTest(
               apiKey,
@@ -127,6 +132,7 @@ export function activate(context: vscode.ExtensionContext) {
               searchResults.matchedClasses,
               testDir,
               framework,
+              imports,
               model,
             );
 

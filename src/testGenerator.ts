@@ -1,6 +1,5 @@
 import OpenAI from "openai";
 import { InterfaceInfo, ClassInfo } from "./codebaseIndexer";
-import { resolveImport } from "./importResolver";
 import { TestFramework } from "./frameworkDetector";
 
 export interface GeneratedTest {
@@ -15,13 +14,12 @@ export async function generateTest(
   matchedClasses: ClassInfo[],
   testDir: string,
   framework: TestFramework,
+  imports: string[],
   model: string = "gpt-4-turbo",
 ): Promise<GeneratedTest> {
   const openai = new OpenAI({ apiKey });
 
-  const importStatements = matchedInterfaces
-    .map((iface) => resolveImport(iface, testDir))
-    .join("\n");
+  const importStatements = imports.join("\n");
 
   const frameworkImports = (() => {
     switch (framework) {
@@ -55,7 +53,7 @@ export async function generateTest(
     .join("\n\n");
 
   // System prompt: Define AI behavior and rules
-  const systemPrompt = `You are an expert TypeScript test generator specializing in Jest and Vitest.
+  const systemPrompt = `You are an expert TypeScript test generator specializing in Jest, Vitest, and Playwright.
 
 Your role:
 - Generate comprehensive, production-quality test suites
@@ -70,7 +68,14 @@ Rules:
 4. Mock external dependencies appropriately
 5. Use type-safe test data
 6. Generate complete, runnable tests with all necessary imports
-7. Follow the Arrange-Act-Assert pattern`;
+7. Follow the Arrange-Act-Assert pattern
+8. Use the ${framework} test style${
+    framework === "vitest"
+      ? " (describe/it or test.describe when grouping; vi for mocks)"
+      : framework === "playwright"
+        ? " (use test() with fixtures; expect from @playwright/test)"
+        : ""
+  }`;
 
   // User prompt: The specific task with context
   const userPrompt = `Generate tests for this user story:
