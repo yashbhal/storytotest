@@ -1,5 +1,7 @@
 # StoryToTest
 
+Status: In progress and evolving.
+
 Generate tests from a user story by scanning your TypeScript project. The extension indexes interfaces and classes, matches them to story entities, and uses an LLM to write tests. It then runs the tests (Jest or Vitest) and retries up to 3 times with errors fed back in.
 
 ## Features
@@ -7,6 +9,13 @@ Generate tests from a user story by scanning your TypeScript project. The extens
 - Framework detection (Jest or Vitest) and deterministic imports
 - Auto-validation loop: run tests, capture errors, retry up to 3 times
 - Writes tests to `__tests__/` and opens the file
+
+## How It Works
+1. Indexes your TypeScript files to extract interfaces and classes
+2. Parses the user story to identify entities
+3. Matches story entities to code symbols by name
+4. Generates a test using the matched types
+5. Runs the test and retries with error feedback if it fails
 
 ## Setup
 1. Open a TypeScript workspace (must have `tsconfig.json` or `.ts/.tsx` files).
