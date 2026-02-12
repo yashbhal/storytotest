@@ -8,6 +8,7 @@ import { SearchResult } from "./componentSearch";
 import { generateTest } from "./testGenerator";
 import { detectFramework, TestFramework } from "./frameworkDetector";
 import { resolveImport } from "./importResolver";
+import { validateAndFixTest } from "./testValidator";
 
 function getWorkspacePath(): string | null {
   const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -76,85 +77,32 @@ async function generateWithPreview(
     searchResults: SearchResult;
     testDir: string;
     imports: string[];
+    workspacePath: string;
   },
 ): Promise<void> {
-  const { apiKey, model, userStory, framework, searchResults, testDir, imports } = params;
+  const { apiKey, model, userStory, framework, searchResults, testDir, imports, workspacePath } = params;
 
-  let generatedTest = await generateTest(
+  const validation = await validateAndFixTest({
     apiKey,
+    model,
     userStory,
-    searchResults.matchedInterfaces,
-    searchResults.matchedClasses,
+    searchResults,
     testDir,
     framework,
     imports,
-    "",
-    model,
-  );
-
-  console.log("=== GENERATED TEST ===");
-  console.log(generatedTest.code);
-
-  // Preview the generated test and ask for confirmation
-  const previewDoc = await vscode.workspace.openTextDocument({
-    language: "typescript",
-    content: generatedTest.code,
+    workspacePath,
+    maxAttempts: 3,
+    progress: {
+      report: ({ message }) => {
+        vscode.window.setStatusBarMessage(message || "", 2000);
+      },
+    },
   });
-  await vscode.window.showTextDocument(previewDoc, { preview: true });
 
-  const choice = await vscode.window.showInformationMessage(
-    `Preview generated test: ${generatedTest.fileName}. Save to __tests__?`,
-    { modal: false },
-    "Accept & Save",
-    "Regenerate",
-    "Regenerate with more context",
-    "Cancel",
-  );
-
-  if (choice === "Regenerate" || choice === "Regenerate with more context") {
-    const extra =
-      choice === "Regenerate with more context"
-        ? await vscode.window.showInputBox({
-            prompt: "Add more guidance for the generated test",
-            placeHolder: "e.g. use React Testing Library, add edge cases for empty data",
-          })
-        : "";
-
-    const regenerated = await generateTest(
-      apiKey,
-      userStory,
-      searchResults.matchedInterfaces,
-      searchResults.matchedClasses,
-      testDir,
-      framework,
-      imports,
-      extra || "",
-      model,
-    );
-
-    const edit = new vscode.WorkspaceEdit();
-    const fullRange = new vscode.Range(
-      previewDoc.positionAt(0),
-      previewDoc.positionAt(previewDoc.getText().length),
-    );
-    edit.replace(previewDoc.uri, fullRange, regenerated.code);
-    await vscode.workspace.applyEdit(edit);
-
-    const confirm = await vscode.window.showInformationMessage(
-      `Regenerated test${extra ? " with extra context" : ""}: ${regenerated.fileName}. Save to __tests__?`,
-      { modal: false },
-      "Accept & Save",
-      "Cancel",
-    );
-
-    if (confirm !== "Accept & Save") {
-      return;
-    }
-
-    generatedTest = regenerated;
-  } else if (choice !== "Accept & Save") {
-    return;
-  }
+  const generatedTest = {
+    code: validation.code,
+    fileName: validation.fileName,
+  };
 
   // Create __tests__ directory if it doesn't exist
   if (!fs.existsSync(testDir)) {
@@ -170,7 +118,15 @@ async function generateWithPreview(
   await vscode.window.showTextDocument(doc);
 
   // Show success message
-  vscode.window.showInformationMessage(`Test generated: ${generatedTest.fileName}`);
+  if (validation.passed) {
+    vscode.window.showInformationMessage(
+      `Test generated and validated in ${validation.attempts} attempt(s): ${generatedTest.fileName}`,
+    );
+  } else {
+    vscode.window.showWarningMessage(
+      `Test generated but not validated after ${validation.attempts} attempt(s). Check the file for issues: ${generatedTest.fileName}`,
+    );
+  }
 }
 
 export function activate(context: vscode.ExtensionContext) {
@@ -259,6 +215,7 @@ export function activate(context: vscode.ExtensionContext) {
               searchResults,
               testDir,
               imports,
+              workspacePath,
             });
           } catch (error) {
             console.error("Error generating test:", error);
