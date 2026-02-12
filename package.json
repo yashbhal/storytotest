@@ -63,5 +63,6 @@
   "dependencies": {
     "openai": "^6.19.0",
     "ts-morph": "^27.0.2"
-  }
+  },
+  "license": "Apache-2.0"
 }

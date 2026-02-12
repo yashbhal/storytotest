@@ -1,71 +1,41 @@
-# storytotest README
+# StoryToTest
 
-This is the README for your extension "storytotest". After writing up a brief description, we recommend including the following sections.
+Generate tests from a user story by scanning your TypeScript project. The extension indexes interfaces and classes, matches them to story entities, and uses an LLM to write tests. It then runs the tests (Jest or Vitest) and retries up to 3 times with errors fed back in.
 
 ## Features
+- Story to test generation using your codebase types
+- Framework detection (Jest or Vitest) and deterministic imports
+- Auto-validation loop: run tests, capture errors, retry up to 3 times
+- Writes tests to `__tests__/` and opens the file
 
-Describe specific features of your extension including screenshots of your extension in action. Image paths are relative to this README file.
+## Setup
+1. Open a TypeScript workspace (must have `tsconfig.json` or `.ts/.tsx` files).
+2. In VS Code settings, set `storytotest.openaiApiKey`.
+3. Optionally set `storytotest.model` (default `gpt-4-turbo`).
+4. Run the command: `StoryToTest: Generate Tests from User Stories`.
 
-For example if there is an image subfolder under your extension project workspace:
+## Usage
+1. Trigger the command from the Command Palette.
+2. Paste a user story, for example: `As a user, I can add items to my shopping cart`.
+3. The extension indexes your code, matches types, generates a test, and runs it.
+4. If tests fail, it retries with the error context. Up to 3 attempts.
+5. On success, the test is saved to `__tests__/` and opened.
 
-\!\[feature X\]\(images/feature-x.png\)
+## Settings
+- `storytotest.openaiApiKey`: OpenAI API key (required).
+- `storytotest.model`: OpenAI model name.
 
-> Tip: Many popular extensions utilize animations. This is an excellent way to show off your extension! We recommend short, focused animations that are easy to follow.
+## Validation loop
+- Supports Jest and Vitest. Unknown frameworks skip validation and return a warning.
+- Commands used:
+  - Jest: `npm test -- <file>`
+  - Vitest: `npx vitest run <file>`
+- Temp test files run in your workspace. Final file is written to `__tests__/`.
 
-## Requirements
+## Known limitations
+- Framework detection and validation only cover Jest and Vitest.
+- Story matching is simple (string matching on entity names); results depend on code naming.
+- No Playwright auto-run yet.
 
-If you have any requirements or dependencies, add a section describing those and how to install and configure them.
-
-## Extension Settings
-
-Include if your extension adds any VS Code settings through the `contributes.configuration` extension point.
-
-For example:
-
-This extension contributes the following settings:
-
-* `myExtension.enable`: Enable/disable this extension.
-* `myExtension.thing`: Set to `blah` to do something.
-
-## Known Issues
-
-Calling out known issues can help limit users opening duplicate issues against your extension.
-
-## Release Notes
-
-Users appreciate release notes as you update your extension.
-
-### 1.0.0
-
-Initial release of ...
-
-### 1.0.1
-
-Fixed issue #.
-
-### 1.1.0
-
-Added features X, Y, and Z.
-
----
-
-## Following extension guidelines
-
-Ensure that you've read through the extensions guidelines and follow the best practices for creating your extension.
-
-* [Extension Guidelines](https://code.visualstudio.com/api/references/extension-guidelines)
-
-## Working with Markdown
-
-You can author your README using Visual Studio Code. Here are some useful editor keyboard shortcuts:
-
-* Split the editor (`Cmd+\` on macOS or `Ctrl+\` on Windows and Linux).
-* Toggle preview (`Shift+Cmd+V` on macOS or `Shift+Ctrl+V` on Windows and Linux).
-* Press `Ctrl+Space` (Windows, Linux, macOS) to see a list of Markdown snippets.
-
-## For more information
-
-* [Visual Studio Code's Markdown Support](http://code.visualstudio.com/docs/languages/markdown)
-* [Markdown Syntax Reference](https://help.github.com/articles/markdown-basics/)
-
-**Enjoy!**
+## License
+Apache 2.0 with attribution (see LICENSE).
