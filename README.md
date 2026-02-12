@@ -10,6 +10,9 @@ Generate tests from a user story by scanning your TypeScript project. The extens
 - Auto-validation loop: run tests, capture errors, retry up to 3 times
 - Writes tests to `__tests__/` and opens the file
 
+## Demo
+![Early demo just to showcase the approximate idea](./early-storytotest-demo-withfaults.gif)
+
 ## How It Works
 1. Indexes your TypeScript files to extract interfaces and classes
 2. Parses the user story to identify entities
