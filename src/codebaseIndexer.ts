@@ -9,6 +9,7 @@ export interface InterfaceInfo {
     name: string;
     type: string;
   }>;
+  isDefaultExport: boolean;
 }
 
 //one interface for classes
@@ -16,6 +17,7 @@ export interface ClassInfo {
   name: string;
   filePath: string;
   methods: string[];
+  isDefaultExport: boolean;
 }
 
 export interface CodebaseIndex {
@@ -56,10 +58,17 @@ export async function indexCodebase(
   for (const sourceFile of sourceFiles) {
     const filePath = sourceFile.getFilePath();
 
-    //get interfaces
+    //get interfaces (only exported ones to avoid generating invalid imports)
     const interfaceDeclarations = sourceFile.getInterfaces();
 
     for (const iface of interfaceDeclarations) {
+      const isDefaultExport = iface.isDefaultExport();
+      const isNamedExport = iface.isExported();
+
+      if (!isNamedExport && !isDefaultExport) {
+        continue;
+      }
+
       const properties = iface.getProperties().map((prop) => ({
         name: prop.getName(),
         type: prop.getType().getText(),
@@ -69,19 +78,28 @@ export async function indexCodebase(
         name: iface.getName(),
         filePath,
         properties,
+        isDefaultExport,
       });
     }
 
-    // get classes
+    // get classes (exported only)
     const classDeclarations = sourceFile.getClasses();
 
     for (const cls of classDeclarations) {
+      const isDefaultExport = cls.isDefaultExport();
+      const isNamedExport = cls.isExported();
+
+      if (!isNamedExport && !isDefaultExport) {
+        continue;
+      }
+
       const methods = cls.getMethods().map((method) => method.getName());
 
       classes.push({
         name: cls.getName() || "Anonymous",
         filePath,
         methods,
+        isDefaultExport,
       });
     }
   }

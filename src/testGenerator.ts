@@ -20,7 +20,8 @@ export async function generateTest(
 ): Promise<GeneratedTest> {
   const openai = new OpenAI({ apiKey });
 
-  const importStatements = imports.join("\n");
+  const dedupedImports = Array.from(new Set(imports));
+  const importStatements = dedupedImports.join("\n");
 
   const frameworkImports = (() => {
     switch (framework) {
@@ -138,6 +139,28 @@ ${frameworkImports ? `Framework imports (add if missing):\n${frameworkImports}\n
     code = `${header}\n\n${code}`;
   }
 
+  // Dedupe imports (framework + model-generated) and keep them at top
+  {
+    const lines = code.split("\n");
+    const seen = new Set<string>();
+    const importLines: string[] = [];
+    const otherLines: string[] = [];
+
+    for (const line of lines) {
+      if (/^\s*import\s/.test(line)) {
+        const normalized = line.replace(/\s+/g, " ").trim();
+        if (!seen.has(normalized)) {
+          seen.add(normalized);
+          importLines.push(line);
+        }
+      } else {
+        otherLines.push(line);
+      }
+    }
+
+    code = [...importLines, "", ...otherLines].join("\n").trim();
+  }
+
   // Generate filename based on first matched interface or class
   let baseName = "generated";
   if (matchedInterfaces.length > 0) {
@@ -146,7 +169,7 @@ ${frameworkImports ? `Framework imports (add if missing):\n${frameworkImports}\n
     baseName = matchedClasses[0].name;
   }
 
-  const fileName = `${baseName}.test.ts`;
+  const fileName = `${baseName}.test.tsx`;
 
   return {
     code,

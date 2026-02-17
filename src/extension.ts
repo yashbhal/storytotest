@@ -19,6 +19,67 @@ function getWorkspacePath(): string | null {
   return workspaceFolders[0].uri.fsPath;
 }
 
+async function scaffoldVitest(workspacePath: string): Promise<void> {
+  const vitestConfigPath = path.join(workspacePath, "vitest.config.ts");
+  const setupDir = path.join(workspacePath, "test");
+  const setupFilePath = path.join(setupDir, "setupTests.ts");
+
+  if (!fs.existsSync(vitestConfigPath)) {
+    const configContent = `import { defineConfig } from 'vitest/config';
+
+export default defineConfig({
+  test: {
+    environment: 'jsdom',
+    globals: true,
+    setupFiles: ['./test/setupTests.ts'],
+  },
+});
+`;
+    fs.writeFileSync(vitestConfigPath, configContent, "utf-8");
+  }
+
+  if (!fs.existsSync(setupDir)) {
+    fs.mkdirSync(setupDir, { recursive: true });
+  }
+
+  if (!fs.existsSync(setupFilePath)) {
+    const setupContent = `import '@testing-library/jest-dom';
+`;
+    fs.writeFileSync(setupFilePath, setupContent, "utf-8");
+  }
+}
+
+async function resolveFrameworkOrPrompt(
+  framework: TestFramework,
+  workspacePath: string,
+): Promise<{ framework: TestFramework; skipValidation: boolean; cancelled: boolean }> {
+  if (framework !== "unknown") {
+    return { framework, skipValidation: false, cancelled: false };
+  }
+
+  const choice = await vscode.window.showInformationMessage(
+    "No Jest or Vitest detected. Set up Vitest now or skip validation?",
+    { modal: false },
+    "Set up Vitest",
+    "Skip validation",
+    "Cancel",
+  );
+
+  if (choice === "Set up Vitest") {
+    await scaffoldVitest(workspacePath);
+    vscode.window.showInformationMessage(
+      "Created vitest.config.ts and test/setupTests.ts. Install dev deps: npm i -D vitest @testing-library/react @testing-library/jest-dom jsdom",
+    );
+    return { framework: "vitest", skipValidation: false, cancelled: false };
+  }
+
+  if (choice === "Skip validation") {
+    return { framework: "unknown", skipValidation: true, cancelled: false };
+  }
+
+  return { framework, skipValidation: false, cancelled: true };
+}
+
 async function validateTypeScriptWorkspace(workspacePath: string): Promise<boolean> {
   const hasTsConfig = fs.existsSync(path.join(workspacePath, "tsconfig.json"));
   const tsFiles = await vscode.workspace.findFiles(
@@ -78,26 +139,58 @@ async function generateWithPreview(
     testDir: string;
     imports: string[];
     workspacePath: string;
+    skipValidation?: boolean;
   },
 ): Promise<void> {
-  const { apiKey, model, userStory, framework, searchResults, testDir, imports, workspacePath } = params;
+  const { apiKey, model, userStory, framework, searchResults, testDir, imports, workspacePath, skipValidation } = params;
 
-  const validation = await validateAndFixTest({
-    apiKey,
-    model,
-    userStory,
-    searchResults,
-    testDir,
-    framework,
-    imports,
-    workspacePath,
-    maxAttempts: 3,
-    progress: {
-      report: ({ message }) => {
-        vscode.window.setStatusBarMessage(message || "", 2000);
+  let validation:
+    | {
+        code: string;
+        fileName: string;
+        attempts: number;
+        passed: boolean;
+        lastError: string | null;
+      }
+    | undefined;
+
+  if (skipValidation) {
+    const generated = await generateTest(
+      apiKey,
+      userStory,
+      searchResults.matchedInterfaces,
+      searchResults.matchedClasses,
+      testDir,
+      framework,
+      imports,
+      "",
+      model,
+    );
+    validation = {
+      code: generated.code,
+      fileName: generated.fileName,
+      attempts: 1,
+      passed: false,
+      lastError: null,
+    };
+  } else {
+    validation = await validateAndFixTest({
+      apiKey,
+      model,
+      userStory,
+      searchResults,
+      testDir,
+      framework,
+      imports,
+      workspacePath,
+      maxAttempts: 3,
+      progress: {
+        report: ({ message }) => {
+          vscode.window.setStatusBarMessage(message || "", 2000);
+        },
       },
-    },
-  });
+    });
+  }
 
   const generatedTest = {
     code: validation.code,
@@ -118,7 +211,11 @@ async function generateWithPreview(
   await vscode.window.showTextDocument(doc);
 
   // Show success message
-  if (validation.passed) {
+  if (skipValidation) {
+    vscode.window.showWarningMessage(
+      `Test generated without validation (no framework configured). File: ${generatedTest.fileName}`,
+    );
+  } else if (validation.passed) {
     vscode.window.showInformationMessage(
       `Test generated and validated in ${validation.attempts} attempt(s): ${generatedTest.fileName}`,
     );
@@ -159,10 +256,12 @@ export function activate(context: vscode.ExtensionContext) {
 
       const framework = detectFramework(workspacePath);
       console.log(`Detected test framework: ${framework}`);
-      if (framework === "unknown") {
-        vscode.window.showWarningMessage(
-          "Test framework not detected (Jest/Vitest/Playwright). Generated tests may need manual tweaks.",
-        );
+      const { framework: effectiveFramework, skipValidation, cancelled } = await resolveFrameworkOrPrompt(
+        framework,
+        workspacePath,
+      );
+      if (cancelled) {
+        return;
       }
 
       // Index, search, and generate
@@ -206,16 +305,17 @@ export function activate(context: vscode.ExtensionContext) {
             }
 
             // Generate test
-            progress.report({ message: `Generating ${framework} test...` });
+            progress.report({ message: `Generating ${effectiveFramework} test...` });
             await generateWithPreview({
               apiKey,
               model,
               userStory,
-              framework,
+              framework: effectiveFramework,
               searchResults,
               testDir,
               imports,
               workspacePath,
+              skipValidation,
             });
           } catch (error) {
             console.error("Error generating test:", error);
