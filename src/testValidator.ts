@@ -1,6 +1,5 @@
 import * as fs from "fs";
 import * as path from "path";
-import * as os from "os";
 import { generateTest } from "./testGenerator";
 import { runTest } from "./testRunner";
 import { InterfaceInfo, ClassInfo } from "./codebaseIndexer";
@@ -49,6 +48,11 @@ export async function validateAndFixTest(params: ValidateParams): Promise<Valida
   let bestCode = "";
   let bestFileName = "generated.test.ts";
 
+  // Ensure target test directory exists so validation writes files with correct relative imports.
+  if (!fs.existsSync(testDir)) {
+    fs.mkdirSync(testDir, { recursive: true });
+  }
+
   while (attempt < maxAttempts) {
     attempt += 1;
     const fixingSuffix = lastError ? " (fixing errors...)" : "";
@@ -58,6 +62,7 @@ export async function validateAndFixTest(params: ValidateParams): Promise<Valida
       ? `Previous attempt failed: ${lastError}. Fix these errors. ${baseExtra}`
       : baseExtra;
 
+    console.log(`Validation attempt ${attempt}/${maxAttempts}`);
     const generated = await generateTest(
       apiKey,
       userStory,
@@ -73,14 +78,19 @@ export async function validateAndFixTest(params: ValidateParams): Promise<Valida
     bestCode = generated.code;
     bestFileName = generated.fileName;
 
-    // Write to a temp file
+    // Write to a temp file inside testDir so relative imports remain correct during validation
     const tempFilePath = path.join(
-      os.tmpdir(),
-      `storytotest-attempt-${Date.now()}-${Math.random().toString(16).slice(2)}.test.ts`,
+      testDir,
+      `storytotest-attempt-${attempt}-${Date.now()}-${Math.random().toString(16).slice(2)}.test.tsx`,
     );
     fs.writeFileSync(tempFilePath, generated.code, "utf-8");
+    console.log(`Wrote validation file: ${tempFilePath}`);
 
     const result = await runTest(tempFilePath, framework, workspacePath);
+    console.log(`Validation result (attempt ${attempt}): passed=${result.passed}`);
+    if (result.error) {
+      console.log(`Validation error output (attempt ${attempt}):\n${result.error}`);
+    }
 
     // Clean up temp file
     try {
@@ -100,6 +110,7 @@ export async function validateAndFixTest(params: ValidateParams): Promise<Valida
     }
 
     lastError = result.error;
+    console.log(`Validation attempt ${attempt} failed.`);
   }
 
   return {
