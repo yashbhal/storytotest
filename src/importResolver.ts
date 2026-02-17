@@ -5,11 +5,17 @@ import { InterfaceInfo } from "./codebaseIndexer";
 // Example output: import { BlogCardProps } from "../app/components/BlogCard";
 export function resolveImport(interfaceInfo: InterfaceInfo, testDir: string): string {
   const relativePathWithExt = path.relative(testDir, interfaceInfo.filePath);
-  const withoutExt = relativePathWithExt.replace(/\.(tsx?|jsx?)$/, "");
+  const withoutExt = relativePathWithExt.replace(/\.tsx?|\.jsx?$/, "");
 
   // Normalize to POSIX-style separators for import paths.
   const normalized = withoutExt.split(path.sep).join("/");
   const importPath = normalized.startsWith(".") ? normalized : `./${normalized}`;
 
-  return `import { ${interfaceInfo.name} } from "${importPath}";`;
+  const name = interfaceInfo.name || "DefaultExport";
+
+  if (interfaceInfo.isDefaultExport) {
+    return `import ${name} from "${importPath}";`;
+  }
+
+  return `import { ${name} } from "${importPath}";`;
 }
