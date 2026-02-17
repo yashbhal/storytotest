@@ -10,6 +10,7 @@ export interface InterfaceInfo {
     type: string;
   }>;
   isDefaultExport: boolean;
+  isExported: boolean;
 }
 
 //one interface for classes
@@ -18,6 +19,7 @@ export interface ClassInfo {
   filePath: string;
   methods: string[];
   isDefaultExport: boolean;
+  isExported: boolean;
 }
 
 export interface CodebaseIndex {
@@ -58,16 +60,12 @@ export async function indexCodebase(
   for (const sourceFile of sourceFiles) {
     const filePath = sourceFile.getFilePath();
 
-    //get interfaces (only exported ones to avoid generating invalid imports)
+    //get interfaces
     const interfaceDeclarations = sourceFile.getInterfaces();
 
     for (const iface of interfaceDeclarations) {
       const isDefaultExport = iface.isDefaultExport();
-      const isNamedExport = iface.isExported();
-
-      if (!isNamedExport && !isDefaultExport) {
-        continue;
-      }
+      const isExported = iface.isExported() || isDefaultExport;
 
       const properties = iface.getProperties().map((prop) => ({
         name: prop.getName(),
@@ -79,19 +77,16 @@ export async function indexCodebase(
         filePath,
         properties,
         isDefaultExport,
+        isExported,
       });
     }
 
-    // get classes (exported only)
+    // get classes
     const classDeclarations = sourceFile.getClasses();
 
     for (const cls of classDeclarations) {
       const isDefaultExport = cls.isDefaultExport();
-      const isNamedExport = cls.isExported();
-
-      if (!isNamedExport && !isDefaultExport) {
-        continue;
-      }
+      const isExported = cls.isExported() || isDefaultExport;
 
       const methods = cls.getMethods().map((method) => method.getName());
 
@@ -100,6 +95,7 @@ export async function indexCodebase(
         filePath,
         methods,
         isDefaultExport,
+        isExported,
       });
     }
   }

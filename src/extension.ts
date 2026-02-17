@@ -122,9 +122,9 @@ async function collectContext(
   console.log("Interfaces:", searchResults.matchedInterfaces.map((i) => i.name));
   console.log("Classes:", searchResults.matchedClasses.map((c) => c.name));
 
-  const imports = searchResults.matchedInterfaces.map((iface) =>
-    resolveImport(iface, testDir),
-  );
+  const imports = searchResults.matchedInterfaces
+    .filter((iface) => iface.isExported)
+    .map((iface) => resolveImport(iface, testDir));
 
   return { parsed, searchResults, imports };
 }

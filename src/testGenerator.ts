@@ -42,7 +42,10 @@ export async function generateTest(
       const props = iface.properties
         .map((p) => `  ${p.name}: ${p.type};`)
         .join("\n");
-      return `// From: ${iface.filePath}\ninterface ${iface.name} {\n${props}\n}`;
+      const exportNote = iface.isExported
+        ? "// exported"
+        : "// not exported in source; do NOT import";
+      return `${exportNote}\n// From: ${iface.filePath}\ninterface ${iface.name} {\n${props}\n}`;
     })
     .join("\n\n");
 
@@ -98,6 +101,7 @@ ${classContext ? `\n## Relevant Classes\n\n${classContext}` : ""}
 - You may import additional types if the tests require them
 - Generate realistic test data that matches the interface properties
 - Write tests that verify the story's acceptance criteria
+// Only import types that are exported from their modules. If a type is noted as "not exported", do not import it; rely on component usage or inline types instead.
 ${extraInstructions ? `\n- Additional guidance: ${extraInstructions}` : ""}
 
 ## Generate a complete test file with:
@@ -143,12 +147,24 @@ ${frameworkImports ? `Framework imports (add if missing):\n${frameworkImports}\n
   {
     const lines = code.split("\n");
     const seen = new Set<string>();
+    const frameworkModules = new Set(["vitest", "@jest/globals", "@playwright/test"]);
+    const frameworkModuleSeen = new Set<string>();
     const importLines: string[] = [];
     const otherLines: string[] = [];
 
     for (const line of lines) {
       if (/^\s*import\s/.test(line)) {
         const normalized = line.replace(/\s+/g, " ").trim();
+
+        const moduleMatch = normalized.match(/from ["']([^"']+)["']/);
+        const modulePath = moduleMatch?.[1];
+        if (modulePath && frameworkModules.has(modulePath)) {
+          if (frameworkModuleSeen.has(modulePath)) {
+            continue; // drop duplicate framework import for same module
+          }
+          frameworkModuleSeen.add(modulePath);
+        }
+
         if (!seen.has(normalized)) {
           seen.add(normalized);
           importLines.push(line);
