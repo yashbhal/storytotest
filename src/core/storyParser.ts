@@ -1,8 +1,6 @@
-export interface ParsedStory {
-  rawText: string;
-  entities: string[]; // Extracted nouns/concepts
-  actions: string[]; // Extracted verbs
-}
+import { ParsedStory } from "./types";
+
+export { ParsedStory };
 
 export function parseStory(storyText: string): ParsedStory {
   const entities: string[] = [];

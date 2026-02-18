@@ -1,11 +1,8 @@
 import OpenAI from "openai";
-import { InterfaceInfo, ClassInfo } from "./codebaseIndexer";
+import { InterfaceInfo, ClassInfo, GeneratedTest } from "./types";
 import { TestFramework } from "./frameworkDetector";
 
-export interface GeneratedTest {
-  code: string;
-  fileName: string;
-}
+export { GeneratedTest };
 
 export async function generateTest(
   apiKey: string,

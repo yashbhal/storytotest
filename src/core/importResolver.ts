@@ -1,5 +1,5 @@
 import * as path from "path";
-import { InterfaceInfo } from "./codebaseIndexer";
+import { InterfaceInfo } from "./types";
 
 // Resolves a relative import statement for a given interface into the target test directory.
 // Example output: import { BlogCardProps } from "../app/components/BlogCard";

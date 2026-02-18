@@ -1,9 +1,6 @@
-import { CodebaseIndex, InterfaceInfo, ClassInfo } from "./codebaseIndexer";
+import { CodebaseIndex, InterfaceInfo, ClassInfo, SearchResult } from "./types";
 
-export interface SearchResult {
-  matchedInterfaces: InterfaceInfo[];
-  matchedClasses: ClassInfo[];
-}
+export { SearchResult };
 
 export function searchComponents(
   index: CodebaseIndex,

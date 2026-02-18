@@ -2,13 +2,11 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import * as path from "path";
 import { TestFramework } from "./frameworkDetector";
+import { TestResult } from "./types";
+
+export { TestResult };
 
 const execAsync = promisify(exec);
-
-export interface TestResult {
-  passed: boolean;
-  error: string | null;
-}
 
 export async function runTest(
   testFilePath: string,

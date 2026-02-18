@@ -2,17 +2,10 @@ import * as fs from "fs";
 import * as path from "path";
 import { generateTest } from "./testGenerator";
 import { runTest } from "./testRunner";
-import { InterfaceInfo, ClassInfo } from "./codebaseIndexer";
+import { InterfaceInfo, ClassInfo, ValidationResult, SearchResult } from "./types";
 import { TestFramework } from "./frameworkDetector";
-import { SearchResult } from "./componentSearch";
 
-export interface ValidationResult {
-  code: string;
-  fileName: string;
-  attempts: number;
-  passed: boolean;
-  lastError: string | null;
-}
+export { ValidationResult };
 
 interface ValidateParams {
   apiKey: string;

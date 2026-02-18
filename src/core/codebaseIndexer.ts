@@ -1,31 +1,8 @@
-import { Project, SourceFile } from "ts-morph";
+import { Project } from "ts-morph";
 import * as path from "path";
+import { InterfaceInfo, ClassInfo, CodebaseIndex } from "./types";
 
-//one interface for interfaces
-export interface InterfaceInfo {
-  name: string;
-  filePath: string;
-  properties: Array<{
-    name: string;
-    type: string;
-  }>;
-  isDefaultExport: boolean;
-  isExported: boolean;
-}
-
-//one interface for classes
-export interface ClassInfo {
-  name: string;
-  filePath: string;
-  methods: string[];
-  isDefaultExport: boolean;
-  isExported: boolean;
-}
-
-export interface CodebaseIndex {
-  interfaces: InterfaceInfo[];
-  classes: ClassInfo[];
-}
+export { InterfaceInfo, ClassInfo, CodebaseIndex };
 
 // main method that gets the classes, gets the interfaces, pushes them onto the interfaces and then gets everything ready to send
 export async function indexCodebase(

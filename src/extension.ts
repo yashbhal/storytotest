@@ -1,14 +1,14 @@
 import * as vscode from "vscode";
 import * as path from "path";
 import * as fs from "fs";
-import { indexCodebase } from "./codebaseIndexer";
-import { parseStory } from "./storyParser";
-import { searchComponents } from "./componentSearch";
-import { SearchResult } from "./componentSearch";
-import { generateTest } from "./testGenerator";
-import { detectFramework, TestFramework } from "./frameworkDetector";
-import { resolveImport } from "./importResolver";
-import { validateAndFixTest } from "./testValidator";
+import { indexCodebase } from "./core/codebaseIndexer";
+import { parseStory } from "./core/storyParser";
+import { searchComponents } from "./core/componentSearch";
+import { SearchResult } from "./core/componentSearch";
+import { generateTest } from "./core/testGenerator";
+import { detectFramework, TestFramework } from "./core/frameworkDetector";
+import { resolveImport } from "./core/importResolver";
+import { validateAndFixTest } from "./core/testValidator";
 
 function getWorkspacePath(): string | null {
   const workspaceFolders = vscode.workspace.workspaceFolders;
