@@ -31,6 +31,12 @@ export default async function handler(
   const payload = (req as any).body ?? (await readBody(req));
   const { action, label, issue } = payload;
 
+  if (!issue) {
+    res.writeHead(400, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ message: "No issue in payload" }));
+    return;
+  }
+
   if (action !== "labeled" || label?.name !== "ready-for-tests") {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ message: "Event ignored" }));
