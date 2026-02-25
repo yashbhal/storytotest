@@ -13,6 +13,7 @@ interface CreateTestPROptions {
   fileContent: string;
   prTitle: string;
   prBody: string;
+  baseBranch?: string;
 }
 
 export class GitHubClient {
@@ -108,7 +109,7 @@ export class GitHubClient {
   async createTestPR(options: CreateTestPROptions): Promise<string> {
     console.log(`Starting test PR creation for issue #${options.issueNumber}`);
 
-    let baseBranch = "main";
+    let baseBranch = options.baseBranch || "main";
     let baseSHA: string;
 
     try {
@@ -118,6 +119,9 @@ export class GitHubClient {
         console.log(`Branch 'main' not found, trying 'master'`);
         baseSHA = await this.getDefaultBranchSHA("master");
         baseBranch = "master";
+      } else if (options.baseBranch) {
+        // If a custom baseBranch was provided but fetch failed with non-404, surface error.
+        throw err;
       } else {
         throw err;
       }

@@ -13,6 +13,7 @@ export interface WorkflowConfig {
   githubOwner: string;
   githubRepo: string;
   openaiApiKey: string;
+  baseBranch?: string;
 }
 
 export interface GitHubIssue {
@@ -64,6 +65,24 @@ export async function processGitHubIssue(
       `Matched ${searchResults.matchedInterfaces.length} interfaces and ${searchResults.matchedClasses.length} classes`,
     );
 
+    if (
+      searchResults.matchedInterfaces.length === 0 &&
+      searchResults.matchedClasses.length === 0
+    ) {
+      const message = "No matching components found for the story; skipping PR creation.";
+      console.log(message);
+      await client.commentOnIssue(
+        issue.number,
+        [
+          message,
+          "",
+          "Story parsed entities:",
+          parsedStory.entities.length ? parsedStory.entities.join(", ") : "<none>",
+        ].join("\n"),
+      );
+      return { success: false, error: message };
+    }
+
     // Step 6 and 7: Generate and validate test code (up to 3 attempts)
     const testDir = path.join(config.workspaceRoot, "__tests__");
     const imports = searchResults.matchedInterfaces.map((iface) =>
@@ -104,6 +123,7 @@ export async function processGitHubIssue(
       fileContent: validationResult.code,
       prTitle,
       prBody,
+      baseBranch: config.baseBranch,
     });
 
     // Step 11: Comment on issue with PR link and results
