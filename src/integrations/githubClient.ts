@@ -16,6 +16,15 @@ interface CreateTestPROptions {
   baseBranch?: string;
 }
 
+interface ExistingPROptions {
+  issueNumber: number;
+}
+
+export interface ExistingPRInfo {
+  url: string;
+  headRef: string;
+}
+
 export class GitHubClient {
   private octokit: Octokit;
   private owner: string;
@@ -25,6 +34,20 @@ export class GitHubClient {
     this.octokit = new Octokit({ auth: config.token });
     this.owner = config.owner;
     this.repo = config.repo;
+  }
+
+  async findBranch(branchName: string): Promise<boolean> {
+    try {
+      await this.octokit.repos.getBranch({
+        owner: this.owner,
+        repo: this.repo,
+        branch: branchName,
+      });
+      return true;
+    } catch (err: any) {
+      if (err?.status === 404) return false;
+      throw err;
+    }
   }
 
   async getDefaultBranchSHA(branch: string): Promise<string> {
@@ -106,6 +129,28 @@ export class GitHubClient {
     console.log(`Comment added to issue #${issueNumber}`);
   }
 
+  async findExistingPR(options: ExistingPROptions): Promise<ExistingPRInfo | null> {
+    const { issueNumber } = options;
+    const { data } = await this.octokit.pulls.list({
+      owner: this.owner,
+      repo: this.repo,
+      state: "open",
+      per_page: 50,
+    });
+
+    const match = data.find((pr) => {
+      const title = pr.title || "";
+      return title.includes(`#${issueNumber}`);
+    });
+
+    if (!match) return null;
+
+    return {
+      url: match.html_url,
+      headRef: match.head.ref,
+    };
+  }
+
   async createTestPR(options: CreateTestPROptions): Promise<string> {
     console.log(`Starting test PR creation for issue #${options.issueNumber}`);
 
@@ -127,7 +172,12 @@ export class GitHubClient {
       }
     }
 
-    await this.createBranch(options.branchName, baseSHA);
+    const branchExists = await this.findBranch(options.branchName);
+    if (!branchExists) {
+      await this.createBranch(options.branchName, baseSHA);
+    } else {
+      console.log(`Reusing existing branch: ${options.branchName}`);
+    }
     await this.commitFile(
       options.branchName,
       options.filePath,

@@ -5,7 +5,7 @@ import { parseStory } from "../core/storyParser";
 import { searchComponents } from "../core/componentSearch";
 import { validateAndFixTest } from "../core/testValidator";
 import { resolveImport } from "../core/importResolver";
-import { GitHubClient } from "./githubClient";
+import { GitHubClient, ExistingPRInfo } from "./githubClient";
 
 export interface WorkflowConfig {
   workspaceRoot: string;
@@ -107,24 +107,56 @@ export async function processGitHubIssue(
     );
 
     // Step 8: Create GitHub branch
-    const timestamp = Date.now();
-    const branchName = `test/issue-${issue.number}-${timestamp}`;
+    let branchName = `test/issue-${issue.number}`;
     const testFilePath = `__tests__/${validationResult.fileName}`;
 
     // Steps 9 and 10: Commit file and create PR
     const prTitle = `Tests for issue #${issue.number}: ${issue.title}`;
     const prBody = buildPRBody(issue, validationResult);
 
-    console.log(`Creating PR for branch: ${branchName}`);
-    const prUrl = await client.createTestPR({
-      issueNumber: issue.number,
-      branchName,
-      filePath: testFilePath,
-      fileContent: validationResult.code,
-      prTitle,
-      prBody,
-      baseBranch: config.baseBranch,
-    });
+    // Reuse PR if one already exists for this issue
+    const existingPr: ExistingPRInfo | null = await client.findExistingPR({ issueNumber: issue.number });
+    let prUrl = existingPr?.url || null;
+    if (existingPr?.headRef) {
+      branchName = existingPr.headRef;
+    }
+
+    if (prUrl) {
+      // Update existing branch with new test content
+      const branchExists = await client.findBranch(branchName);
+      if (!branchExists) {
+        // Fall back to creating branch from base
+        const base = config.baseBranch || "main";
+        let baseSHA: string;
+        try {
+          baseSHA = await client.getDefaultBranchSHA(base);
+        } catch (err: any) {
+          if (base !== "master") {
+            baseSHA = await client.getDefaultBranchSHA("master");
+          } else {
+            throw err;
+          }
+        }
+        await client.createBranch(branchName, baseSHA);
+      }
+      await client.commitFile(
+        branchName,
+        testFilePath,
+        validationResult.code,
+        `Update generated tests for issue #${issue.number}`,
+      );
+    } else {
+      console.log(`Creating PR for branch: ${branchName}`);
+      prUrl = await client.createTestPR({
+        issueNumber: issue.number,
+        branchName,
+        filePath: testFilePath,
+        fileContent: validationResult.code,
+        prTitle,
+        prBody,
+        baseBranch: config.baseBranch,
+      });
+    }
 
     // Step 11: Comment on issue with PR link and results
     const issueComment = buildIssueComment(prUrl, validationResult);
