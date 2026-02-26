@@ -16,6 +16,13 @@ interface CreateTestPROptions {
   baseBranch?: string;
 }
 
+export interface CreateTestPRResult {
+  url: string;
+  headRef: string;
+  headSha: string;
+  number: number;
+}
+
 interface ExistingPROptions {
   issueNumber: number;
 }
@@ -23,6 +30,21 @@ interface ExistingPROptions {
 export interface ExistingPRInfo {
   url: string;
   headRef: string;
+  headSha: string;
+  number: number;
+}
+
+interface CheckRunOptions {
+  name: string;
+  headSha: string;
+  conclusion: "success" | "failure";
+  summary: string;
+  details?: string;
+}
+
+interface LabelOptions {
+  prNumber: number;
+  label: string;
 }
 
 export class GitHubClient {
@@ -52,6 +74,15 @@ export class GitHubClient {
 
   async getDefaultBranchSHA(branch: string): Promise<string> {
     console.log(`Getting SHA for branch: ${branch}`);
+    const response = await this.octokit.repos.getBranch({
+      owner: this.owner,
+      repo: this.repo,
+      branch,
+    });
+    return response.data.commit.sha;
+  }
+
+  async getBranchHeadSHA(branch: string): Promise<string> {
     const response = await this.octokit.repos.getBranch({
       owner: this.owner,
       repo: this.repo,
@@ -103,7 +134,7 @@ export class GitHubClient {
     body: string,
     head: string,
     base: string,
-  ): Promise<string> {
+  ): Promise<CreateTestPRResult> {
     console.log(`Creating PR: ${title}`);
     const response = await this.octokit.pulls.create({
       owner: this.owner,
@@ -113,9 +144,13 @@ export class GitHubClient {
       head,
       base,
     });
-    const prUrl = response.data.html_url;
-    console.log(`PR created: ${prUrl}`);
-    return prUrl;
+    console.log(`PR created: ${response.data.html_url}`);
+    return {
+      url: response.data.html_url,
+      headRef: response.data.head.ref,
+      headSha: response.data.head.sha,
+      number: response.data.number,
+    };
   }
 
   async commentOnIssue(issueNumber: number, comment: string): Promise<void> {
@@ -148,10 +183,12 @@ export class GitHubClient {
     return {
       url: match.html_url,
       headRef: match.head.ref,
+      headSha: match.head.sha,
+      number: match.number,
     };
   }
 
-  async createTestPR(options: CreateTestPROptions): Promise<string> {
+  async createTestPR(options: CreateTestPROptions): Promise<CreateTestPRResult> {
     console.log(`Starting test PR creation for issue #${options.issueNumber}`);
 
     let baseBranch = options.baseBranch || "main";
@@ -185,13 +222,51 @@ export class GitHubClient {
       `Add generated tests for issue #${options.issueNumber}`,
     );
 
-    const prUrl = await this.createPullRequest(
+    const pr = await this.createPullRequest(
       options.prTitle,
       options.prBody,
       options.branchName,
       baseBranch,
     );
 
-    return prUrl;
+    return pr;
+  }
+
+  async getPullRequest(prNumber: number): Promise<CreateTestPRResult> {
+    const pr = await this.octokit.pulls.get({
+      owner: this.owner,
+      repo: this.repo,
+      pull_number: prNumber,
+    });
+    return {
+      url: pr.data.html_url,
+      headRef: pr.data.head.ref,
+      headSha: pr.data.head.sha,
+      number: pr.data.number,
+    };
+  }
+
+  async createCheckRun(options: CheckRunOptions): Promise<void> {
+    await this.octokit.checks.create({
+      owner: this.owner,
+      repo: this.repo,
+      name: options.name,
+      head_sha: options.headSha,
+      conclusion: options.conclusion,
+      output: {
+        title: options.summary,
+        summary: options.summary,
+        text: options.details,
+      },
+    });
+  }
+
+  async addLabel(options: LabelOptions): Promise<void> {
+    await this.octokit.issues.addLabels({
+      owner: this.owner,
+      repo: this.repo,
+      issue_number: options.prNumber,
+      labels: [options.label],
+    });
   }
 }

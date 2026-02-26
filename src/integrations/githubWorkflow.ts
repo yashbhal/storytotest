@@ -5,7 +5,11 @@ import { parseStory } from "../core/storyParser";
 import { searchComponents } from "../core/componentSearch";
 import { validateAndFixTest } from "../core/testValidator";
 import { resolveImport } from "../core/importResolver";
-import { GitHubClient, ExistingPRInfo } from "./githubClient";
+import {
+  GitHubClient,
+  ExistingPRInfo,
+  CreateTestPRResult,
+} from "./githubClient";
 
 export interface WorkflowConfig {
   workspaceRoot: string;
@@ -14,6 +18,8 @@ export interface WorkflowConfig {
   githubRepo: string;
   openaiApiKey: string;
   baseBranch?: string;
+  maxAttempts?: number;
+  testOutputDir?: string;
 }
 
 export interface GitHubIssue {
@@ -84,7 +90,10 @@ export async function processGitHubIssue(
     }
 
     // Step 6 and 7: Generate and validate test code (up to 3 attempts)
-    const testDir = path.join(config.workspaceRoot, "__tests__");
+    const testDir = path.join(
+      config.workspaceRoot,
+      config.testOutputDir || "__tests__",
+    );
     const imports = searchResults.matchedInterfaces.map((iface) =>
       resolveImport(iface, testDir),
     );
@@ -99,7 +108,7 @@ export async function processGitHubIssue(
       framework,
       imports,
       workspacePath: config.workspaceRoot,
-      maxAttempts: 3,
+      maxAttempts: config.maxAttempts ?? 3,
     });
 
     console.log(
@@ -116,7 +125,9 @@ export async function processGitHubIssue(
 
     // Reuse PR if one already exists for this issue
     const existingPr: ExistingPRInfo | null = await client.findExistingPR({ issueNumber: issue.number });
-    let prUrl = existingPr?.url || null;
+    let prUrl: string | null = existingPr?.url || null;
+    let prHeadSha: string | undefined = existingPr?.headSha;
+    let prNumber: number | undefined = existingPr?.number;
     if (existingPr?.headRef) {
       branchName = existingPr.headRef;
     }
@@ -145,9 +156,12 @@ export async function processGitHubIssue(
         validationResult.code,
         `Update generated tests for issue #${issue.number}`,
       );
+
+      // Refresh head SHA for check runs
+      prHeadSha = existingPr?.headSha ?? (await client.getBranchHeadSHA(branchName));
     } else {
       console.log(`Creating PR for branch: ${branchName}`);
-      prUrl = await client.createTestPR({
+      const pr: CreateTestPRResult = await client.createTestPR({
         issueNumber: issue.number,
         branchName,
         filePath: testFilePath,
@@ -156,10 +170,43 @@ export async function processGitHubIssue(
         prBody,
         baseBranch: config.baseBranch,
       });
+      prUrl = pr.url;
+      prHeadSha = pr.headSha;
+      prNumber = pr.number;
+    }
+
+    // Add PR label for visibility
+    if (prNumber) {
+      try {
+        await client.addLabel({ prNumber, label: "tests-generated" });
+      } catch (labelErr: any) {
+        console.log(`Failed to add label: ${labelErr?.message}`);
+      }
+    }
+
+    // Create check run with validation status
+    if (prHeadSha) {
+      const summary = validationResult.passed
+        ? `Validation passed in ${validationResult.attempts} attempt(s)`
+        : `Validation failed after ${validationResult.attempts} attempt(s)`;
+      const details = validationResult.lastError
+        ? formatErrorSnippet(validationResult.lastError)
+        : undefined;
+      try {
+        await client.createCheckRun({
+          name: "StoryToTest",
+          headSha: prHeadSha,
+          conclusion: validationResult.passed ? "success" : "failure",
+          summary,
+          details,
+        });
+      } catch (checkErr: any) {
+        console.log(`Failed to create check run: ${checkErr?.message}`);
+      }
     }
 
     // Step 11: Comment on issue with PR link and results
-    const issueComment = buildIssueComment(prUrl, validationResult);
+    const issueComment = buildIssueComment(prUrl || "", validationResult);
     await client.commentOnIssue(issue.number, issueComment);
 
     console.log(`Workflow completed successfully for issue #${issue.number}`);
@@ -189,6 +236,11 @@ function buildPRBody(
     ? `Passed after ${validationResult.attempts} attempt(s)`
     : `Did not pass after ${validationResult.attempts} attempt(s) - ${validationResult.lastError ?? "unknown error"}`;
 
+  const errorSection =
+    validationResult.passed || !validationResult.lastError
+      ? ""
+      : `\n\n<details><summary>Last validation error</summary>\n\n${formatErrorSnippet(validationResult.lastError)}\n\n</details>`;
+
   return [
     `## Auto-generated Tests`,
     ``,
@@ -196,7 +248,7 @@ function buildPRBody(
     ``,
     `**Issue:** [${issue.title}](${issue.html_url})`,
     ``,
-    `**Validation:** ${validationStatus}`,
+    `**Validation:** ${validationStatus}` + errorSection,
     ``,
     `### Issue Description`,
     ``,
@@ -206,11 +258,15 @@ function buildPRBody(
 
 function buildIssueComment(
   prUrl: string,
-  validationResult: { passed: boolean; attempts: number },
+  validationResult: { passed: boolean; attempts: number; lastError?: string | null },
 ): string {
   const status = validationResult.passed
     ? "passed validation and a pull request has been created"
     : "generated (validation did not pass) and a pull request has been created";
+
+  const errorSnippet = !validationResult.passed && validationResult.lastError
+    ? [``, `Last error:`, formatErrorSnippet(validationResult.lastError)].join("\n")
+    : "";
 
   return [
     `Tests have been ${status}.`,
@@ -218,5 +274,12 @@ function buildIssueComment(
     `**PR:** ${prUrl}`,
     ``,
     `Validation attempts: ${validationResult.attempts}`,
+    errorSnippet,
   ].join("\n");
+}
+
+function formatErrorSnippet(error: string): string {
+  const trimmed = error.trim();
+  const lines = trimmed.split(/\r?\n/).slice(0, 20); // cap length for readability
+  return "```\n" + lines.join("\n") + "\n```";
 }
