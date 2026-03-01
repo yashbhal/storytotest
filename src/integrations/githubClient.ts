@@ -191,19 +191,17 @@ export class GitHubClient {
   async createTestPR(options: CreateTestPROptions): Promise<CreateTestPRResult> {
     console.log(`Starting test PR creation for issue #${options.issueNumber}`);
 
-    let baseBranch = options.baseBranch || "main";
+    const requestedBaseBranch = options.baseBranch || "main";
+    let baseBranch = requestedBaseBranch;
     let baseSHA: string;
 
     try {
-      baseSHA = await this.getDefaultBranchSHA("main");
+      baseSHA = await this.getDefaultBranchSHA(baseBranch);
     } catch (err: any) {
-      if (err?.status === 404) {
+      if (err?.status === 404 && requestedBaseBranch === "main") {
         console.log(`Branch 'main' not found, trying 'master'`);
         baseSHA = await this.getDefaultBranchSHA("master");
         baseBranch = "master";
-      } else if (options.baseBranch) {
-        // If a custom baseBranch was provided but fetch failed with non-404, surface error.
-        throw err;
       } else {
         throw err;
       }
