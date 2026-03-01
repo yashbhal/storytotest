@@ -4,12 +4,15 @@ import { generateTest } from "./testGenerator";
 import { runTest } from "./testRunner";
 import { InterfaceInfo, ClassInfo, ValidationResult, SearchResult } from "./types";
 import { TestFramework } from "./frameworkDetector";
+import { LLMProvider } from "../llm/provider";
 
 export { ValidationResult };
 
 interface ValidateParams {
   apiKey: string;
   model: string;
+  provider?: LLMProvider;
+  baseUrl?: string;
   userStory: string;
   searchResults: SearchResult;
   testDir: string;
@@ -25,6 +28,8 @@ export async function validateAndFixTest(params: ValidateParams): Promise<Valida
   const {
     apiKey,
     model,
+    provider,
+    baseUrl,
     userStory,
     searchResults,
     testDir,
@@ -66,6 +71,7 @@ export async function validateAndFixTest(params: ValidateParams): Promise<Valida
       imports,
       extra,
       model,
+      { provider, baseUrl },
     );
 
     bestCode = generated.code;
