@@ -7,6 +7,11 @@ import { validateAndFixTest } from "../core/testValidator";
 import { resolveImport } from "../core/importResolver";
 import { generateTest } from "../core/testGenerator";
 import {
+  getDefaultModelForProvider,
+  LLMProvider,
+  normalizeProvider,
+} from "../llm/provider";
+import {
   GitHubClient,
   ExistingPRInfo,
   CreateTestPRResult,
@@ -17,7 +22,10 @@ export interface WorkflowConfig {
   githubToken: string;
   githubOwner: string;
   githubRepo: string;
-  openaiApiKey: string;
+  llmApiKey: string;
+  llmProvider?: LLMProvider;
+  llmModel?: string;
+  llmBaseUrl?: string;
   baseBranch?: string;
   maxAttempts?: number;
   testOutputDir?: string;
@@ -66,6 +74,9 @@ export async function processGitHubIssue(
     const framework = detectFramework(config.workspaceRoot);
     console.log(`Detected framework: ${framework}`);
     const shouldValidate = framework === "jest" || framework === "vitest";
+    const provider = normalizeProvider(config.llmProvider, "openai");
+    const model = config.llmModel || getDefaultModelForProvider(provider);
+    const baseUrl = config.llmBaseUrl;
 
     // Step 3: Index codebase
     console.log(`Indexing codebase at: ${config.workspaceRoot}`);
@@ -112,8 +123,10 @@ export async function processGitHubIssue(
     const validationResult: WorkflowValidationResult = shouldValidate
       ? {
           ...(await validateAndFixTest({
-            apiKey: config.openaiApiKey,
-            model: "gpt-4-turbo",
+            apiKey: config.llmApiKey,
+            model,
+            provider,
+            baseUrl,
             userStory: storyText,
             searchResults,
             testDir,
@@ -126,7 +139,10 @@ export async function processGitHubIssue(
           framework,
         }
       : await generateWithoutValidation({
-          apiKey: config.openaiApiKey,
+          apiKey: config.llmApiKey,
+          model,
+          provider,
+          baseUrl,
           userStory: storyText,
           searchResults,
           testDir,
@@ -315,6 +331,9 @@ function formatErrorSnippet(error: string): string {
 
 async function generateWithoutValidation(params: {
   apiKey: string;
+  model: string;
+  provider: LLMProvider;
+  baseUrl?: string;
   userStory: string;
   searchResults: ReturnType<typeof searchComponents>;
   testDir: string;
@@ -330,7 +349,8 @@ async function generateWithoutValidation(params: {
     params.framework,
     params.imports,
     "Validation is skipped for this framework. Focus on generating a runnable test file.",
-    "gpt-4-turbo",
+    params.model,
+    { provider: params.provider, baseUrl: params.baseUrl },
   );
 
   return {

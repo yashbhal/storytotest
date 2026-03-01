@@ -1,6 +1,7 @@
 import * as crypto from "crypto";
 import { IncomingMessage, ServerResponse } from "http";
 import { processGitHubIssue, WorkflowConfig } from "../../src/integrations/githubWorkflow";
+import { resolveLLMEnvConfig } from "../../src/llm/env";
 
 type WaitUntilFn = (promise: Promise<unknown>) => void;
 
@@ -106,10 +107,10 @@ export default async function handler(
   const githubToken = process.env.GITHUB_TOKEN;
   const githubOwner = process.env.GITHUB_OWNER;
   const githubRepo = process.env.GITHUB_REPO;
-  const openaiApiKey = process.env.OPENAI_API_KEY;
+  const llm = resolveLLMEnvConfig(process.env);
   const workspaceRoot = process.env.WORKSPACE_ROOT ?? "/tmp/workspace";
 
-  if (!githubToken || !githubOwner || !githubRepo || !openaiApiKey) {
+  if (!githubToken || !githubOwner || !githubRepo || !llm.apiKey) {
     res.writeHead(500, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ message: "Missing required environment variables" }));
     return;
@@ -120,7 +121,10 @@ export default async function handler(
     githubToken,
     githubOwner,
     githubRepo,
-    openaiApiKey,
+    llmApiKey: llm.apiKey,
+    llmProvider: llm.provider,
+    llmModel: llm.model,
+    llmBaseUrl: llm.baseUrl,
   };
 
   const githubIssue = {

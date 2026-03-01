@@ -1,6 +1,7 @@
 import * as http from "http";
 import * as crypto from "crypto";
 import { processGitHubIssue, WorkflowConfig, GitHubIssue } from "./githubWorkflow";
+import { resolveLLMEnvConfig } from "../llm/env";
 
 interface WebhookServerConfig extends WorkflowConfig {
   port: number;
@@ -111,10 +112,12 @@ function getEnvConfig(): WebhookServerConfig | null {
   const githubToken = process.env.GITHUB_TOKEN;
   const githubOwner = process.env.GITHUB_OWNER;
   const githubRepo = process.env.GITHUB_REPO;
-  const openaiApiKey = process.env.OPENAI_API_KEY;
+  const llm = resolveLLMEnvConfig(process.env);
 
-  if (!workspaceRoot || !githubToken || !githubOwner || !githubRepo || !openaiApiKey) {
-    console.error("Missing required env vars: WORKSPACE_ROOT, GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO, OPENAI_API_KEY");
+  if (!workspaceRoot || !githubToken || !githubOwner || !githubRepo || !llm.apiKey) {
+    console.error(
+      "Missing required env vars: WORKSPACE_ROOT, GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO, and a provider API key (LLM_API_KEY or provider-specific key)",
+    );
     return null;
   }
 
@@ -124,7 +127,10 @@ function getEnvConfig(): WebhookServerConfig | null {
     githubToken,
     githubOwner,
     githubRepo,
-    openaiApiKey,
+    llmApiKey: llm.apiKey,
+    llmProvider: llm.provider,
+    llmModel: llm.model,
+    llmBaseUrl: llm.baseUrl,
     baseBranch: process.env.BASE_BRANCH,
     maxAttempts: process.env.MAX_ATTEMPTS ? Number(process.env.MAX_ATTEMPTS) : undefined,
     testOutputDir: process.env.TEST_OUTPUT_DIR,
