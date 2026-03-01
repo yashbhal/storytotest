@@ -1,10 +1,11 @@
 import * as path from "path";
-import { detectFramework } from "../core/frameworkDetector";
+import { detectFramework, TestFramework } from "../core/frameworkDetector";
 import { indexCodebase } from "../core/codebaseIndexer";
 import { parseStory } from "../core/storyParser";
 import { searchComponents } from "../core/componentSearch";
 import { validateAndFixTest } from "../core/testValidator";
 import { resolveImport } from "../core/importResolver";
+import { generateTest } from "../core/testGenerator";
 import {
   GitHubClient,
   ExistingPRInfo,
@@ -35,6 +36,16 @@ export interface WorkflowResult {
   error?: string;
 }
 
+interface WorkflowValidationResult {
+  code: string;
+  fileName: string;
+  attempts: number;
+  passed: boolean;
+  lastError: string | null;
+  skipped: boolean;
+  framework: TestFramework;
+}
+
 export async function processGitHubIssue(
   issue: GitHubIssue,
   config: WorkflowConfig,
@@ -54,6 +65,7 @@ export async function processGitHubIssue(
     console.log(`Detecting test framework in: ${config.workspaceRoot}`);
     const framework = detectFramework(config.workspaceRoot);
     console.log(`Detected framework: ${framework}`);
+    const shouldValidate = framework === "jest" || framework === "vitest";
 
     // Step 3: Index codebase
     console.log(`Indexing codebase at: ${config.workspaceRoot}`);
@@ -90,26 +102,37 @@ export async function processGitHubIssue(
     }
 
     // Step 6 and 7: Generate and validate test code (up to 3 attempts)
-    const testDir = path.join(
-      config.workspaceRoot,
-      config.testOutputDir || "__tests__",
-    );
-    const imports = searchResults.matchedInterfaces.map((iface) =>
-      resolveImport(iface, testDir),
-    );
+    const outputDir = normalizeOutputDir(config.testOutputDir);
+    const testDir = path.join(config.workspaceRoot, outputDir);
+    const imports = searchResults.matchedInterfaces
+      .filter((iface) => iface.isExported)
+      .map((iface) => resolveImport(iface, testDir));
 
     console.log(`Generating and validating tests`);
-    const validationResult = await validateAndFixTest({
-      apiKey: config.openaiApiKey,
-      model: "gpt-4-turbo",
-      userStory: storyText,
-      searchResults,
-      testDir,
-      framework,
-      imports,
-      workspacePath: config.workspaceRoot,
-      maxAttempts: config.maxAttempts ?? 3,
-    });
+    const validationResult: WorkflowValidationResult = shouldValidate
+      ? {
+          ...(await validateAndFixTest({
+            apiKey: config.openaiApiKey,
+            model: "gpt-4-turbo",
+            userStory: storyText,
+            searchResults,
+            testDir,
+            framework,
+            imports,
+            workspacePath: config.workspaceRoot,
+            maxAttempts: config.maxAttempts ?? 3,
+          })),
+          skipped: false,
+          framework,
+        }
+      : await generateWithoutValidation({
+          apiKey: config.openaiApiKey,
+          userStory: storyText,
+          searchResults,
+          testDir,
+          framework,
+          imports,
+        });
 
     console.log(
       `Validation result: passed=${validationResult.passed}, attempts=${validationResult.attempts}`,
@@ -117,7 +140,7 @@ export async function processGitHubIssue(
 
     // Step 8: Create GitHub branch
     let branchName = `test/issue-${issue.number}`;
-    const testFilePath = `__tests__/${validationResult.fileName}`;
+    const testFilePath = path.posix.join(outputDir, validationResult.fileName);
 
     // Steps 9 and 10: Commit file and create PR
     const prTitle = `Tests for issue #${issue.number}: ${issue.title}`;
@@ -158,7 +181,7 @@ export async function processGitHubIssue(
       );
 
       // Refresh head SHA for check runs
-      prHeadSha = existingPr?.headSha ?? (await client.getBranchHeadSHA(branchName));
+      prHeadSha = await client.getBranchHeadSHA(branchName);
     } else {
       console.log(`Creating PR for branch: ${branchName}`);
       const pr: CreateTestPRResult = await client.createTestPR({
@@ -186,17 +209,19 @@ export async function processGitHubIssue(
 
     // Create check run with validation status
     if (prHeadSha) {
-      const summary = validationResult.passed
-        ? `Validation passed in ${validationResult.attempts} attempt(s)`
-        : `Validation failed after ${validationResult.attempts} attempt(s)`;
-      const details = validationResult.lastError
+      const summary = validationResult.skipped
+        ? `Validation skipped for ${validationResult.framework}`
+        : validationResult.passed
+          ? `Validation passed in ${validationResult.attempts} attempt(s)`
+          : `Validation failed after ${validationResult.attempts} attempt(s)`;
+      const details = !validationResult.skipped && validationResult.lastError
         ? formatErrorSnippet(validationResult.lastError)
         : undefined;
       try {
         await client.createCheckRun({
           name: "StoryToTest",
           headSha: prHeadSha,
-          conclusion: validationResult.passed ? "success" : "failure",
+          conclusion: validationResult.skipped || validationResult.passed ? "success" : "failure",
           summary,
           details,
         });
@@ -230,14 +255,16 @@ export async function processGitHubIssue(
 
 function buildPRBody(
   issue: GitHubIssue,
-  validationResult: { passed: boolean; attempts: number; lastError: string | null },
+  validationResult: WorkflowValidationResult,
 ): string {
-  const validationStatus = validationResult.passed
-    ? `Passed after ${validationResult.attempts} attempt(s)`
-    : `Did not pass after ${validationResult.attempts} attempt(s) - ${validationResult.lastError ?? "unknown error"}`;
+  const validationStatus = validationResult.skipped
+    ? `Skipped for framework ${validationResult.framework}`
+    : validationResult.passed
+      ? `Passed after ${validationResult.attempts} attempt(s)`
+      : `Did not pass after ${validationResult.attempts} attempt(s) - ${validationResult.lastError ?? "unknown error"}`;
 
   const errorSection =
-    validationResult.passed || !validationResult.lastError
+    validationResult.skipped || validationResult.passed || !validationResult.lastError
       ? ""
       : `\n\n<details><summary>Last validation error</summary>\n\n${formatErrorSnippet(validationResult.lastError)}\n\n</details>`;
 
@@ -258,13 +285,15 @@ function buildPRBody(
 
 function buildIssueComment(
   prUrl: string,
-  validationResult: { passed: boolean; attempts: number; lastError?: string | null },
+  validationResult: WorkflowValidationResult,
 ): string {
-  const status = validationResult.passed
-    ? "passed validation and a pull request has been created"
-    : "generated (validation did not pass) and a pull request has been created";
+  const status = validationResult.skipped
+    ? `generated (validation skipped for ${validationResult.framework}) and a pull request has been created`
+    : validationResult.passed
+      ? "passed validation and a pull request has been created"
+      : "generated (validation did not pass) and a pull request has been created";
 
-  const errorSnippet = !validationResult.passed && validationResult.lastError
+  const errorSnippet = !validationResult.skipped && !validationResult.passed && validationResult.lastError
     ? [``, `Last error:`, formatErrorSnippet(validationResult.lastError)].join("\n")
     : "";
 
@@ -282,4 +311,53 @@ function formatErrorSnippet(error: string): string {
   const trimmed = error.trim();
   const lines = trimmed.split(/\r?\n/).slice(0, 20); // cap length for readability
   return "```\n" + lines.join("\n") + "\n```";
+}
+
+async function generateWithoutValidation(params: {
+  apiKey: string;
+  userStory: string;
+  searchResults: ReturnType<typeof searchComponents>;
+  testDir: string;
+  framework: TestFramework;
+  imports: string[];
+}): Promise<WorkflowValidationResult> {
+  const generated = await generateTest(
+    params.apiKey,
+    params.userStory,
+    params.searchResults.matchedInterfaces,
+    params.searchResults.matchedClasses,
+    params.testDir,
+    params.framework,
+    params.imports,
+    "Validation is skipped for this framework. Focus on generating a runnable test file.",
+    "gpt-4-turbo",
+  );
+
+  return {
+    code: generated.code,
+    fileName: generated.fileName,
+    attempts: 1,
+    passed: false,
+    lastError: null,
+    skipped: true,
+    framework: params.framework,
+  };
+}
+
+function normalizeOutputDir(outputDir?: string): string {
+  const fallback = "__tests__";
+  const candidate = (outputDir ?? fallback).trim();
+  if (!candidate) {
+    return fallback;
+  }
+
+  const withoutDrive = candidate.replace(/^[A-Za-z]:/, "");
+  const withForwardSlashes = withoutDrive.replace(/\\/g, "/").replace(/^\/+/, "");
+  const normalized = path.posix.normalize(withForwardSlashes);
+
+  if (normalized === "." || normalized.startsWith("../")) {
+    return fallback;
+  }
+
+  return normalized;
 }
