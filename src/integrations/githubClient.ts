@@ -4,6 +4,7 @@ interface GitHubConfig {
   token: string;
   owner: string;
   repo: string;
+  dryRun?: boolean;
 }
 
 interface CreateTestPROptions {
@@ -51,11 +52,13 @@ export class GitHubClient {
   private octokit: Octokit;
   private owner: string;
   private repo: string;
+  private dryRun: boolean;
 
   constructor(config: GitHubConfig) {
     this.octokit = new Octokit({ auth: config.token });
     this.owner = config.owner;
     this.repo = config.repo;
+    this.dryRun = config.dryRun ?? false;
   }
 
   async findBranch(branchName: string): Promise<boolean> {
@@ -92,6 +95,10 @@ export class GitHubClient {
   }
 
   async createBranch(branchName: string, fromSHA: string): Promise<void> {
+    if (this.dryRun) {
+      console.log(`[dry-run][branch] Would create branch: ${branchName} from SHA: ${fromSHA}`);
+      return;
+    }
     console.log(`Creating branch: ${branchName} from SHA: ${fromSHA}`);
     try {
       await this.octokit.git.createRef({
@@ -116,6 +123,12 @@ export class GitHubClient {
     content: string,
     message: string,
   ): Promise<void> {
+    if (this.dryRun) {
+      console.log(`[dry-run][commit] Would commit file: ${filePath} to branch: ${branchName}`);
+      console.log(`[dry-run][commit] Message: ${message}`);
+      console.log(`[dry-run][commit] Content length: ${content.length} bytes`);
+      return;
+    }
     console.log(`Committing file: ${filePath} to branch: ${branchName}`);
     const base64Content = Buffer.from(content, "utf-8").toString("base64");
     await this.octokit.repos.createOrUpdateFileContents({
@@ -135,6 +148,17 @@ export class GitHubClient {
     head: string,
     base: string,
   ): Promise<CreateTestPRResult> {
+    if (this.dryRun) {
+      console.log(`[dry-run][pr] Would create PR: ${title}`);
+      console.log(`[dry-run][pr] Head: ${head}, Base: ${base}`);
+      console.log(`[dry-run][pr] Body preview: ${body.substring(0, 200)}...`);
+      return {
+        url: `https://github.com/${this.owner}/${this.repo}/pull/0`,
+        headRef: head,
+        headSha: "dry-run-sha",
+        number: 0,
+      };
+    }
     console.log(`Creating PR: ${title}`);
     const response = await this.octokit.pulls.create({
       owner: this.owner,
@@ -154,6 +178,11 @@ export class GitHubClient {
   }
 
   async commentOnIssue(issueNumber: number, comment: string): Promise<void> {
+    if (this.dryRun) {
+      console.log(`[dry-run][comment] Would comment on issue #${issueNumber}`);
+      console.log(`[dry-run][comment] Content preview: ${comment.substring(0, 200)}...`);
+      return;
+    }
     console.log(`Commenting on issue #${issueNumber}`);
     await this.octokit.issues.createComment({
       owner: this.owner,
@@ -191,19 +220,17 @@ export class GitHubClient {
   async createTestPR(options: CreateTestPROptions): Promise<CreateTestPRResult> {
     console.log(`Starting test PR creation for issue #${options.issueNumber}`);
 
-    let baseBranch = options.baseBranch || "main";
+    const requestedBaseBranch = options.baseBranch || "main";
+    let baseBranch = requestedBaseBranch;
     let baseSHA: string;
 
     try {
-      baseSHA = await this.getDefaultBranchSHA("main");
+      baseSHA = await this.getDefaultBranchSHA(baseBranch);
     } catch (err: any) {
-      if (err?.status === 404) {
+      if (err?.status === 404 && requestedBaseBranch === "main") {
         console.log(`Branch 'main' not found, trying 'master'`);
         baseSHA = await this.getDefaultBranchSHA("master");
         baseBranch = "master";
-      } else if (options.baseBranch) {
-        // If a custom baseBranch was provided but fetch failed with non-404, surface error.
-        throw err;
       } else {
         throw err;
       }
@@ -247,6 +274,11 @@ export class GitHubClient {
   }
 
   async createCheckRun(options: CheckRunOptions): Promise<void> {
+    if (this.dryRun) {
+      console.log(`[dry-run][check] Would create check run: ${options.name}`);
+      console.log(`[dry-run][check] Conclusion: ${options.conclusion}, Summary: ${options.summary}`);
+      return;
+    }
     await this.octokit.checks.create({
       owner: this.owner,
       repo: this.repo,
@@ -262,6 +294,10 @@ export class GitHubClient {
   }
 
   async addLabel(options: LabelOptions): Promise<void> {
+    if (this.dryRun) {
+      console.log(`[dry-run][label] Would add label "${options.label}" to PR #${options.prNumber}`);
+      return;
+    }
     await this.octokit.issues.addLabels({
       owner: this.owner,
       repo: this.repo,

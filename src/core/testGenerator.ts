@@ -1,8 +1,14 @@
-import OpenAI from "openai";
 import { InterfaceInfo, ClassInfo, GeneratedTest } from "./types";
 import { TestFramework } from "./frameworkDetector";
+import { generateText } from "../llm/client";
+import { LLMProvider } from "../llm/provider";
 
 export { GeneratedTest };
+
+export interface LLMGenerationOptions {
+  provider?: LLMProvider;
+  baseUrl?: string;
+}
 
 export async function generateTest(
   apiKey: string,
@@ -14,9 +20,8 @@ export async function generateTest(
   imports: string[],
   extraInstructions: string = "",
   model: string = "gpt-4-turbo",
+  llmOptions: LLMGenerationOptions = {},
 ): Promise<GeneratedTest> {
-  const openai = new OpenAI({ apiKey });
-
   const dedupedImports = Array.from(new Set(imports));
   const importStatements = dedupedImports.join("\n");
 
@@ -112,18 +117,16 @@ ${frameworkImports ? `Framework imports (add if missing):\n${frameworkImports}\n
 5. **Assertions**: Clear expect() statements that validate the story
 6. **Setup/Teardown**: Use beforeEach/afterEach if needed`;
 
-  // Call OpenAI API
-  const response = await openai.chat.completions.create({
+  const generatedCode = await generateText({
+    provider: llmOptions.provider || "openai",
+    apiKey,
     model,
-    messages: [
-      { role: "system", content: systemPrompt },
-      { role: "user", content: userPrompt },
-    ],
-    temperature: 0.3, // Lower = more consistent/predictable
-    max_tokens: 2000,
+    systemPrompt,
+    userPrompt,
+    temperature: 0.3,
+    maxTokens: 2000,
+    baseUrl: llmOptions.baseUrl,
   });
-
-  const generatedCode = response.choices[0].message.content || "";
 
   // Extract code from markdown if present
   let code = generatedCode;

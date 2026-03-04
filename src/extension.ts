@@ -9,6 +9,7 @@ import { generateTest } from "./core/testGenerator";
 import { detectFramework, TestFramework } from "./core/frameworkDetector";
 import { resolveImport } from "./core/importResolver";
 import { validateAndFixTest } from "./core/testValidator";
+import { getDefaultModelForProvider, LLMProvider, normalizeProvider } from "./llm/provider";
 
 function getWorkspacePath(): string | null {
   const workspaceFolders = vscode.workspace.workspaceFolders;
@@ -133,6 +134,8 @@ async function generateWithPreview(
   params: {
     apiKey: string;
     model: string;
+    provider: LLMProvider;
+    baseUrl?: string;
     userStory: string;
     framework: TestFramework;
     searchResults: SearchResult;
@@ -142,7 +145,19 @@ async function generateWithPreview(
     skipValidation?: boolean;
   },
 ): Promise<void> {
-  const { apiKey, model, userStory, framework, searchResults, testDir, imports, workspacePath, skipValidation } = params;
+  const {
+    apiKey,
+    model,
+    provider,
+    baseUrl,
+    userStory,
+    framework,
+    searchResults,
+    testDir,
+    imports,
+    workspacePath,
+    skipValidation,
+  } = params;
 
   let validation:
     | {
@@ -165,6 +180,7 @@ async function generateWithPreview(
       imports,
       "",
       model,
+      { provider, baseUrl },
     );
     validation = {
       code: generated.code,
@@ -177,6 +193,8 @@ async function generateWithPreview(
     validation = await validateAndFixTest({
       apiKey,
       model,
+      provider,
+      baseUrl,
       userStory,
       searchResults,
       testDir,
@@ -294,12 +312,18 @@ export function activate(context: vscode.ExtensionContext) {
 
             // Get API key and model from settings
             const config = vscode.workspace.getConfiguration("storytotest");
-            const apiKey = config.get<string>("openaiApiKey");
-            const model = config.get<string>("model") || "gpt-4-turbo";
+            const provider = normalizeProvider(config.get<string>("provider"), "openai");
+            const apiKey =
+              config.get<string>("apiKey")?.trim() ||
+              config.get<string>("openaiApiKey")?.trim() ||
+              "";
+            const defaultModel = getDefaultModelForProvider(provider);
+            const model = config.get<string>("model")?.trim() || defaultModel;
+            const baseUrl = config.get<string>("baseUrl")?.trim() || undefined;
 
             if (!apiKey) {
               vscode.window.showErrorMessage(
-                'OpenAI API key not configured. Go to Settings (Cmd+,) and search for "storytotest"',
+                `API key not configured for provider "${provider}". Go to Settings (Cmd+,) and search for "storytotest".`,
               );
               return;
             }
@@ -309,6 +333,8 @@ export function activate(context: vscode.ExtensionContext) {
             await generateWithPreview({
               apiKey,
               model,
+              provider,
+              baseUrl,
               userStory,
               framework: effectiveFramework,
               searchResults,

@@ -26,18 +26,34 @@
         "storytotest.openaiApiKey": {
           "type": "string",
           "default": "",
-          "description": "OpenAI API key for test generation",
-          "markdownDescription": "Your OpenAI API key. Get one at https://platform.openai.com/api-keys"
+          "description": "Legacy API key setting (kept for backward compatibility)",
+          "markdownDescription": "Deprecated. Prefer `storytotest.apiKey`."
+        },
+        "storytotest.apiKey": {
+          "type": "string",
+          "default": "",
+          "description": "API key for the selected provider",
+          "markdownDescription": "API key used with `storytotest.provider`."
+        },
+        "storytotest.provider": {
+          "type": "string",
+          "default": "openai",
+          "enum": [
+            "openai",
+            "anthropic",
+            "gemini"
+          ],
+          "description": "LLM provider to use for test generation"
+        },
+        "storytotest.baseUrl": {
+          "type": "string",
+          "default": "",
+          "description": "Optional custom base URL for the selected provider"
         },
         "storytotest.model": {
           "type": "string",
           "default": "gpt-4-turbo",
-          "enum": [
-            "gpt-4-turbo",
-            "gpt-4o",
-            "gpt-4"
-          ],
-          "description": "OpenAI model to use for test generation"
+          "description": "Model name for the selected provider"
         }
       }
     }
@@ -57,6 +73,7 @@
     "@vscode/test-cli": "^0.0.12",
     "@vscode/test-electron": "^2.5.2",
     "eslint": "^9.39.2",
+    "ts-node": "^10.9.2",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.54.0"
   },

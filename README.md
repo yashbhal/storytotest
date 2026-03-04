@@ -12,8 +12,8 @@ Generate tests from a user story by scanning your TypeScript project. The extens
 - Deterministic framework imports, default vs named import handling, and import deduplication
 - Writes tests to `__tests__/` and opens the file
 
-## Early demo just to showcase the approximate idea
-![Early demo just to showcase the approximate idea](./early-storytotest-demo-withfaults.gif)
+## Demo
+![Demo](./the-demo.gif)
 
 ## How It Works
 1. Indexes your TypeScript files to extract interfaces and classes, tagging whether they are exported and whether they are default exports.
@@ -24,8 +24,11 @@ Generate tests from a user story by scanning your TypeScript project. The extens
 
 ## Setup
 1. Open a TypeScript workspace (must have `tsconfig.json` or `.ts/.tsx` files).
-2. In VS Code settings, set `storytotest.openaiApiKey`.
-3. Optionally set `storytotest.model` (default `gpt-4-turbo`).
+2. In VS Code settings, set `storytotest.apiKey` (or legacy `storytotest.openaiApiKey`).
+3. Optionally set:
+   - `storytotest.provider` (`openai`, `anthropic`, `gemini`)
+   - `storytotest.model` (provider model name)
+   - `storytotest.baseUrl` (optional custom endpoint)
 4. Run the command: `StoryToTest: Generate Tests from User Stories`.
 5. If no framework is detected, choose to scaffold Vitest (creates `vitest.config.ts` and `test/setupTests.ts`) or skip validation.
 
@@ -37,8 +40,30 @@ Generate tests from a user story by scanning your TypeScript project. The extens
 5. On success, the test is saved to `__tests__/` and opened.
 
 ## Settings
-- `storytotest.openaiApiKey`: OpenAI API key (required).
-- `storytotest.model`: OpenAI model name.
+- `storytotest.apiKey`: API key for the selected provider.
+- `storytotest.provider`: LLM provider (`openai`, `anthropic`, `gemini`).
+- `storytotest.model`: Model name for the selected provider.
+- `storytotest.baseUrl`: Optional base URL override for the provider.
+- `storytotest.openaiApiKey`: Legacy key setting kept for backward compatibility.
+
+## Webhook/Automation Env Vars
+- `LLM_PROVIDER`: `openai` | `anthropic` | `gemini` (default: `openai`)
+- `LLM_API_KEY`: Generic API key for the selected provider
+- Provider-specific key fallback:
+  - `OPENAI_API_KEY`
+  - `ANTHROPIC_API_KEY`
+  - `GEMINI_API_KEY`
+- `LLM_MODEL`: Generic model setting (falls back to provider defaults)
+- Provider-specific model fallback:
+  - `OPENAI_MODEL`
+  - `ANTHROPIC_MODEL`
+  - `GEMINI_MODEL`
+- `LLM_BASE_URL`: Generic base URL override (optional)
+- Provider-specific base URL fallback:
+  - `OPENAI_BASE_URL`
+  - `ANTHROPIC_BASE_URL`
+  - `GEMINI_BASE_URL`
+- `DRY_RUN`: Set to `true` to enable demo mode (runs full workflow but skips GitHub writes, logs intended actions instead)
 
 ## Validation loop
 - Supports Jest and Vitest. Playwright and unknown frameworks skip validation with a warning (generation only).

@@ -1,4 +1,5 @@
 import { Project } from "ts-morph";
+import * as fs from "fs";
 import * as path from "path";
 import { InterfaceInfo, ClassInfo, CodebaseIndex } from "./types";
 
@@ -9,23 +10,32 @@ export async function indexCodebase(
   workspacePath: string,
 ): Promise<CodebaseIndex> {
   console.log(`Starting to index codebase at: ${workspacePath}`);
+  const tsConfigPath = path.join(workspacePath, "tsconfig.json");
+  const hasTsConfig = fs.existsSync(tsConfigPath);
 
-  // make a ts-morph project
-  const project = new Project({
-    tsConfigFilePath: path.join(workspacePath, "tsconfig.json"),
-    skipAddingFilesFromTsConfig: true, // skipping so its possible to manually add files
-  });
+  // Create a ts-morph project. Use tsconfig when present, otherwise fall back to basic settings.
+  const project = hasTsConfig
+    ? new Project({
+        tsConfigFilePath: tsConfigPath,
+        skipAddingFilesFromTsConfig: true,
+      })
+    : new Project({
+        skipAddingFilesFromTsConfig: true,
+      });
 
-  // add all source files to the project
+  const workspaceGlobRoot = workspacePath.split(path.sep).join("/");
+  // Scan TS/TSX files across the workspace while excluding common generated directories.
   project.addSourceFilesAtPaths([
-    path.join(workspacePath, "src/**/*.ts"),
-    path.join(workspacePath, "src/**/*.tsx"),
-    path.join(workspacePath, "app/**/*.ts"), // Add this
-    path.join(workspacePath, "app/**/*.tsx"), // Add this
-    path.join(workspacePath, "lib/**/*.ts"), // Common folder
-    path.join(workspacePath, "lib/**/*.tsx"),
-    path.join(workspacePath, "components/**/*.ts"), // Another common pattern
-    path.join(workspacePath, "components/**/*.tsx"),
+    `${workspaceGlobRoot}/**/*.ts`,
+    `${workspaceGlobRoot}/**/*.tsx`,
+    `!${workspaceGlobRoot}/**/*.d.ts`,
+    `!${workspaceGlobRoot}/**/node_modules/**`,
+    `!${workspaceGlobRoot}/**/dist/**`,
+    `!${workspaceGlobRoot}/**/build/**`,
+    `!${workspaceGlobRoot}/**/out/**`,
+    `!${workspaceGlobRoot}/**/.next/**`,
+    `!${workspaceGlobRoot}/**/coverage/**`,
+    `!${workspaceGlobRoot}/**/.turbo/**`,
   ]);
 
   const sourceFiles = project.getSourceFiles();

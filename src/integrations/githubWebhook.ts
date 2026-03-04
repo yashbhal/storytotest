@@ -1,11 +1,13 @@
 import * as http from "http";
 import * as crypto from "crypto";
 import { processGitHubIssue, WorkflowConfig, GitHubIssue } from "./githubWorkflow";
+import { resolveLLMEnvConfig } from "../llm/env";
+import { envBool, envInt, envString } from "./envHelper";
 
 interface WebhookServerConfig extends WorkflowConfig {
   port: number;
   webhookSecret?: string;
-  triggerLabel?: string; // if set, require this label on the issue
+  triggerLabel?: string;
 }
 
 function verifySignature(secret: string | undefined, body: string, signature: string | undefined): boolean {
@@ -107,30 +109,35 @@ export function startIssueWebhookServer(config: WebhookServerConfig): http.Serve
 }
 
 function getEnvConfig(): WebhookServerConfig | null {
-  const workspaceRoot = process.env.WORKSPACE_ROOT;
-  const githubToken = process.env.GITHUB_TOKEN;
-  const githubOwner = process.env.GITHUB_OWNER;
-  const githubRepo = process.env.GITHUB_REPO;
-  const openaiApiKey = process.env.OPENAI_API_KEY;
+  const workspaceRoot = envString("WORKSPACE_ROOT");
+  const githubToken = envString("GITHUB_TOKEN");
+  const githubOwner = envString("GITHUB_OWNER");
+  const githubRepo = envString("GITHUB_REPO");
+  const llm = resolveLLMEnvConfig(process.env);
 
-  if (!workspaceRoot || !githubToken || !githubOwner || !githubRepo || !openaiApiKey) {
-    console.error("Missing required env vars: WORKSPACE_ROOT, GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO, OPENAI_API_KEY");
+  if (!workspaceRoot || !githubToken || !githubOwner || !githubRepo || !llm.apiKey) {
+    console.error(
+      "Missing required env vars: WORKSPACE_ROOT, GITHUB_TOKEN, GITHUB_OWNER, GITHUB_REPO, and a provider API key (LLM_API_KEY or provider-specific key)",
+    );
     return null;
   }
 
-  const port = Number(process.env.PORT || "3000");
   return {
     workspaceRoot,
     githubToken,
     githubOwner,
     githubRepo,
-    openaiApiKey,
-    baseBranch: process.env.BASE_BRANCH,
-    maxAttempts: process.env.MAX_ATTEMPTS ? Number(process.env.MAX_ATTEMPTS) : undefined,
-    testOutputDir: process.env.TEST_OUTPUT_DIR,
-    webhookSecret: process.env.WEBHOOK_SECRET,
-    triggerLabel: process.env.TRIGGER_LABEL,
-    port,
+    llmApiKey: llm.apiKey,
+    llmProvider: llm.provider,
+    llmModel: llm.model,
+    llmBaseUrl: llm.baseUrl,
+    baseBranch: envString("BASE_BRANCH"),
+    maxAttempts: envInt("MAX_ATTEMPTS"),
+    testOutputDir: envString("TEST_OUTPUT_DIR"),
+    webhookSecret: envString("WEBHOOK_SECRET"),
+    triggerLabel: envString("TRIGGER_LABEL"),
+    dryRun: envBool("DRY_RUN"),
+    port: envInt("PORT", 3000) as number,
   };
 }
 
