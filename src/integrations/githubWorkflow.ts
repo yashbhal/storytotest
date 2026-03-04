@@ -29,6 +29,7 @@ export interface WorkflowConfig {
   baseBranch?: string;
   maxAttempts?: number;
   testOutputDir?: string;
+  dryRun?: boolean;
 }
 
 export interface GitHubIssue {
@@ -62,11 +63,13 @@ export async function processGitHubIssue(
     token: config.githubToken,
     owner: config.githubOwner,
     repo: config.githubRepo,
+    dryRun: config.dryRun,
   });
 
   try {
     // Step 1: Extract story from issue
-    console.log(`Processing issue #${issue.number}: ${issue.title}`);
+    const prefix = config.dryRun ? `[issue #${issue.number}][dry-run] ` : "";
+    console.log(`${prefix}Processing issue #${issue.number}: ${issue.title}`);
     const storyText = [issue.title, issue.body ?? ""].join("\n").trim();
 
     // Step 2: Detect test framework
@@ -224,12 +227,10 @@ export async function processGitHubIssue(
     }
 
     // Create check run with validation status
-    if (prHeadSha) {
+    if (prHeadSha && validationResult.passed) {
       const summary = validationResult.skipped
         ? `Validation skipped for ${validationResult.framework}`
-        : validationResult.passed
-          ? `Validation passed in ${validationResult.attempts} attempt(s)`
-          : `Validation failed after ${validationResult.attempts} attempt(s)`;
+        : `Validation passed in ${validationResult.attempts} attempt(s)`;
       const details = !validationResult.skipped && validationResult.lastError
         ? formatErrorSnippet(validationResult.lastError)
         : undefined;
@@ -237,13 +238,15 @@ export async function processGitHubIssue(
         await client.createCheckRun({
           name: "StoryToTest",
           headSha: prHeadSha,
-          conclusion: validationResult.skipped || validationResult.passed ? "success" : "failure",
+          conclusion: "success",
           summary,
           details,
         });
       } catch (checkErr: any) {
         console.log(`Failed to create check run: ${checkErr?.message}`);
       }
+    } else {
+      console.log("Skipping check run because validation did not pass or was skipped");
     }
 
     // Step 11: Comment on issue with PR link and results

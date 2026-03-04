@@ -63,6 +63,7 @@ Generate tests from a user story by scanning your TypeScript project. The extens
   - `OPENAI_BASE_URL`
   - `ANTHROPIC_BASE_URL`
   - `GEMINI_BASE_URL`
+- `DRY_RUN`: Set to `true` to enable demo mode (runs full workflow but skips GitHub writes, logs intended actions instead)
 
 ## Validation loop
 - Supports Jest and Vitest. Playwright and unknown frameworks skip validation with a warning (generation only).

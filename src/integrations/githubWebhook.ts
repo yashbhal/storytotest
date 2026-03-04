@@ -6,7 +6,7 @@ import { resolveLLMEnvConfig } from "../llm/env";
 interface WebhookServerConfig extends WorkflowConfig {
   port: number;
   webhookSecret?: string;
-  triggerLabel?: string; // if set, require this label on the issue
+  triggerLabel?: string;
 }
 
 function verifySignature(secret: string | undefined, body: string, signature: string | undefined): boolean {
@@ -122,6 +122,7 @@ function getEnvConfig(): WebhookServerConfig | null {
   }
 
   const port = Number(process.env.PORT || "3000");
+  const dryRun = process.env.DRY_RUN === "true";
   return {
     workspaceRoot,
     githubToken,
@@ -136,6 +137,7 @@ function getEnvConfig(): WebhookServerConfig | null {
     testOutputDir: process.env.TEST_OUTPUT_DIR,
     webhookSecret: process.env.WEBHOOK_SECRET,
     triggerLabel: process.env.TRIGGER_LABEL,
+    dryRun,
     port,
   };
 }

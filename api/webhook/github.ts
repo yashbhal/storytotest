@@ -109,6 +109,7 @@ export default async function handler(
   const githubRepo = process.env.GITHUB_REPO;
   const llm = resolveLLMEnvConfig(process.env);
   const workspaceRoot = process.env.WORKSPACE_ROOT ?? "/tmp/workspace";
+  const dryRun = process.env.DRY_RUN === "true";
 
   if (!githubToken || !githubOwner || !githubRepo || !llm.apiKey) {
     res.writeHead(500, { "Content-Type": "application/json" });
@@ -125,6 +126,7 @@ export default async function handler(
     llmProvider: llm.provider,
     llmModel: llm.model,
     llmBaseUrl: llm.baseUrl,
+    dryRun,
   };
 
   const githubIssue = {
