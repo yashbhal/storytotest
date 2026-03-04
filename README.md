@@ -12,8 +12,8 @@ Generate tests from a user story by scanning your TypeScript project. The extens
 - Deterministic framework imports, default vs named import handling, and import deduplication
 - Writes tests to `__tests__/` and opens the file
 
-## Early demo just to showcase the approximate idea
-![Early demo just to showcase the approximate idea](./early-storytotest-demo-withfaults.gif)
+## Demo
+![Demo](./the-demo.gif)
 
 ## How It Works
 1. Indexes your TypeScript files to extract interfaces and classes, tagging whether they are exported and whether they are default exports.
