@@ -2,6 +2,7 @@ import * as http from "http";
 import * as crypto from "crypto";
 import { processGitHubIssue, WorkflowConfig, GitHubIssue } from "./githubWorkflow";
 import { resolveLLMEnvConfig } from "../llm/env";
+import { envBool, envInt, envString } from "./envHelper";
 
 interface WebhookServerConfig extends WorkflowConfig {
   port: number;
@@ -108,10 +109,10 @@ export function startIssueWebhookServer(config: WebhookServerConfig): http.Serve
 }
 
 function getEnvConfig(): WebhookServerConfig | null {
-  const workspaceRoot = process.env.WORKSPACE_ROOT;
-  const githubToken = process.env.GITHUB_TOKEN;
-  const githubOwner = process.env.GITHUB_OWNER;
-  const githubRepo = process.env.GITHUB_REPO;
+  const workspaceRoot = envString("WORKSPACE_ROOT");
+  const githubToken = envString("GITHUB_TOKEN");
+  const githubOwner = envString("GITHUB_OWNER");
+  const githubRepo = envString("GITHUB_REPO");
   const llm = resolveLLMEnvConfig(process.env);
 
   if (!workspaceRoot || !githubToken || !githubOwner || !githubRepo || !llm.apiKey) {
@@ -121,8 +122,6 @@ function getEnvConfig(): WebhookServerConfig | null {
     return null;
   }
 
-  const port = Number(process.env.PORT || "3000");
-  const dryRun = process.env.DRY_RUN === "true";
   return {
     workspaceRoot,
     githubToken,
@@ -132,13 +131,13 @@ function getEnvConfig(): WebhookServerConfig | null {
     llmProvider: llm.provider,
     llmModel: llm.model,
     llmBaseUrl: llm.baseUrl,
-    baseBranch: process.env.BASE_BRANCH,
-    maxAttempts: process.env.MAX_ATTEMPTS ? Number(process.env.MAX_ATTEMPTS) : undefined,
-    testOutputDir: process.env.TEST_OUTPUT_DIR,
-    webhookSecret: process.env.WEBHOOK_SECRET,
-    triggerLabel: process.env.TRIGGER_LABEL,
-    dryRun,
-    port,
+    baseBranch: envString("BASE_BRANCH"),
+    maxAttempts: envInt("MAX_ATTEMPTS"),
+    testOutputDir: envString("TEST_OUTPUT_DIR"),
+    webhookSecret: envString("WEBHOOK_SECRET"),
+    triggerLabel: envString("TRIGGER_LABEL"),
+    dryRun: envBool("DRY_RUN"),
+    port: envInt("PORT", 3000) as number,
   };
 }
 

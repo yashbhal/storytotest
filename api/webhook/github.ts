@@ -1,7 +1,10 @@
 import * as crypto from "crypto";
+import { execSync } from "child_process";
+import * as fs from "fs";
 import { IncomingMessage, ServerResponse } from "http";
 import { processGitHubIssue, WorkflowConfig } from "../../src/integrations/githubWorkflow";
 import { resolveLLMEnvConfig } from "../../src/llm/env";
+import { envBool, envString } from "../../src/integrations/envHelper";
 
 type WaitUntilFn = (promise: Promise<unknown>) => void;
 
@@ -51,6 +54,41 @@ function verifySignature(
     "sha256=" + crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
 
   return safeEqual(expectedSignature, signature);
+}
+
+function ensureWorkspace(
+  workspacePath: string,
+  owner: string,
+  repo: string,
+  token: string,
+  issueNumber: number,
+): void {
+  const log = (msg: string) =>
+    console.log(`[issue #${issueNumber}][workspace] ${msg}`);
+
+  // If the directory exists and has contents, assume it's already set up
+  if (fs.existsSync(workspacePath)) {
+    const entries = fs.readdirSync(workspacePath);
+    if (entries.length > 0) {
+      log(`Already populated: ${workspacePath}`);
+      return;
+    }
+  } else {
+    fs.mkdirSync(workspacePath, { recursive: true });
+  }
+
+  const cloneUrl = `https://x-access-token:${token}@github.com/${owner}/${repo}.git`;
+  log(`Cloning ${owner}/${repo} into ${workspacePath} (shallow)`);
+  try {
+    execSync(
+      `git clone --depth 1 ${cloneUrl} ${workspacePath}`,
+      { stdio: "pipe", timeout: 120_000 },
+    );
+    log("Clone complete");
+  } catch (err: any) {
+    const stderr = err?.stderr?.toString().trim() ?? err?.message ?? "unknown error";
+    throw new Error(`Failed to clone workspace repo: ${stderr}`);
+  }
 }
 
 function resolveWaitUntil(): WaitUntilFn | null {
@@ -104,16 +142,26 @@ export default async function handler(
     return;
   }
 
-  const githubToken = process.env.GITHUB_TOKEN;
-  const githubOwner = process.env.GITHUB_OWNER;
-  const githubRepo = process.env.GITHUB_REPO;
+  const githubToken = envString("GITHUB_TOKEN");
+  const githubOwner = envString("GITHUB_OWNER");
+  const githubRepo = envString("GITHUB_REPO");
   const llm = resolveLLMEnvConfig(process.env);
-  const workspaceRoot = process.env.WORKSPACE_ROOT ?? "/tmp/workspace";
-  const dryRun = process.env.DRY_RUN === "true";
+  const workspaceRoot = envString("WORKSPACE_ROOT", "/tmp/workspace");
+  const dryRun = envBool("DRY_RUN");
 
   if (!githubToken || !githubOwner || !githubRepo || !llm.apiKey) {
     res.writeHead(500, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ message: "Missing required environment variables" }));
+    return;
+  }
+
+  // Ensure workspace exists for serverless environments
+  try {
+    ensureWorkspace(workspaceRoot, githubOwner, githubRepo, githubToken, issue.number as number);
+  } catch (wsErr: any) {
+    console.log(`[issue #${issue.number}][workspace] ${wsErr.message}`);
+    res.writeHead(500, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ message: wsErr.message }));
     return;
   }
 
