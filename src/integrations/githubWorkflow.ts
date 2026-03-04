@@ -1,8 +1,9 @@
+import * as fs from "fs";
 import * as path from "path";
 import { detectFramework, TestFramework } from "../core/frameworkDetector";
 import { indexCodebase } from "../core/codebaseIndexer";
 import { parseStory } from "../core/storyParser";
-import { searchComponents } from "../core/componentSearch";
+import { searchComponents, SearchResult } from "../core/componentSearch";
 import { validateAndFixTest } from "../core/testValidator";
 import { resolveImport } from "../core/importResolver";
 import { generateTest } from "../core/testGenerator";
@@ -16,6 +17,7 @@ import {
   ExistingPRInfo,
   CreateTestPRResult,
 } from "./githubClient";
+import { envBool } from "./envHelper";
 
 export interface WorkflowConfig {
   workspaceRoot: string;
@@ -59,6 +61,9 @@ export async function processGitHubIssue(
   issue: GitHubIssue,
   config: WorkflowConfig,
 ): Promise<WorkflowResult> {
+  const log = (step: string, msg: string) =>
+    console.log(`[issue #${issue.number}][${step}] ${msg}`);
+
   const client = new GitHubClient({
     token: config.githubToken,
     owner: config.githubOwner,
@@ -68,41 +73,47 @@ export async function processGitHubIssue(
 
   try {
     // Step 1: Extract story from issue
-    const prefix = config.dryRun ? `[issue #${issue.number}][dry-run] ` : "";
-    console.log(`${prefix}Processing issue #${issue.number}: ${issue.title}`);
+    log("start", `Processing: ${issue.title}${config.dryRun ? " (dry-run)" : ""}`);
     const storyText = [issue.title, issue.body ?? ""].join("\n").trim();
 
     // Step 2: Detect test framework
-    console.log(`Detecting test framework in: ${config.workspaceRoot}`);
-    const framework = detectFramework(config.workspaceRoot);
-    console.log(`Detected framework: ${framework}`);
+    log("detect", `workspace: ${config.workspaceRoot}`);
+    let framework = detectFramework(config.workspaceRoot);
+    log("detect", `framework: ${framework}`);
+
+    if (framework === "unknown" && envBool("ALLOW_SCAFFOLD_VITEST")) {
+      log("scaffold", "No framework detected — scaffolding minimal Vitest config");
+      scaffoldVitest(config.workspaceRoot);
+      framework = "vitest";
+    } else if (framework === "unknown") {
+      log("detect", "No framework detected (set ALLOW_SCAFFOLD_VITEST=true to auto-scaffold)");
+    }
+
     const shouldValidate = framework === "jest" || framework === "vitest";
     const provider = normalizeProvider(config.llmProvider, "openai");
     const model = config.llmModel || getDefaultModelForProvider(provider);
     const baseUrl = config.llmBaseUrl;
 
     // Step 3: Index codebase
-    console.log(`Indexing codebase at: ${config.workspaceRoot}`);
+    log("index", "Indexing codebase");
     const codebaseIndex = await indexCodebase(config.workspaceRoot);
 
     // Step 4: Parse story entities
-    console.log(`Parsing story entities`);
+    log("parse", "Parsing story entities");
     const parsedStory = parseStory(storyText);
-    console.log(`Found entities: ${parsedStory.entities.join(", ")}`);
+    log("parse", `entities: ${parsedStory.entities.join(", ")}`);
 
     // Step 5: Search for matching components
-    console.log(`Searching for matching components`);
+    log("search", "Searching for matching components");
     const searchResults = searchComponents(codebaseIndex, parsedStory.entities);
-    console.log(
-      `Matched ${searchResults.matchedInterfaces.length} interfaces and ${searchResults.matchedClasses.length} classes`,
-    );
+    log("search", `Matched ${searchResults.matchedInterfaces.length} interfaces, ${searchResults.matchedClasses.length} classes`);
 
     if (
       searchResults.matchedInterfaces.length === 0 &&
       searchResults.matchedClasses.length === 0
     ) {
-      const message = "No matching components found for the story; skipping PR creation.";
-      console.log(message);
+      const message = "No matching components found; skipping PR creation.";
+      log("search", message);
       await client.commentOnIssue(
         issue.number,
         [
@@ -122,26 +133,17 @@ export async function processGitHubIssue(
       .filter((iface) => iface.isExported)
       .map((iface) => resolveImport(iface, testDir));
 
-    console.log(`Generating and validating tests`);
-    const validationResult: WorkflowValidationResult = shouldValidate
-      ? {
-          ...(await validateAndFixTest({
-            apiKey: config.llmApiKey,
-            model,
-            provider,
-            baseUrl,
-            userStory: storyText,
-            searchResults,
-            testDir,
-            framework,
-            imports,
-            workspacePath: config.workspaceRoot,
-            maxAttempts: config.maxAttempts ?? 3,
-          })),
-          skipped: false,
-          framework,
-        }
-      : await generateWithoutValidation({
+    log("generate", "Generating and validating tests");
+
+    const missingDeps = shouldValidate
+      ? detectMissingValidationDeps(config.workspaceRoot, framework)
+      : [];
+
+    let validationResult: WorkflowValidationResult;
+
+    if (shouldValidate && missingDeps.length === 0) {
+      validationResult = {
+        ...(await validateAndFixTest({
           apiKey: config.llmApiKey,
           model,
           provider,
@@ -151,11 +153,33 @@ export async function processGitHubIssue(
           testDir,
           framework,
           imports,
-        });
+          workspacePath: config.workspaceRoot,
+          maxAttempts: config.maxAttempts ?? 3,
+        })),
+        skipped: false,
+        framework,
+      };
+    } else {
+      if (missingDeps.length > 0) {
+        log("validate", `Skipping — missing deps: ${missingDeps.join(", ")}`);
+      }
+      const generated = await generateWithoutValidation({
+        apiKey: config.llmApiKey,
+        model,
+        provider,
+        baseUrl,
+        userStory: storyText,
+        searchResults,
+        testDir,
+        framework,
+        imports,
+      });
+      validationResult = missingDeps.length > 0
+        ? { ...generated, lastError: `Missing validation deps: ${missingDeps.join(", ")}` }
+        : generated;
+    }
 
-    console.log(
-      `Validation result: passed=${validationResult.passed}, attempts=${validationResult.attempts}`,
-    );
+    log("validate", `passed=${validationResult.passed}, attempts=${validationResult.attempts}`);
 
     // Step 8: Create GitHub branch
     let branchName = `test/issue-${issue.number}`;
@@ -163,7 +187,7 @@ export async function processGitHubIssue(
 
     // Steps 9 and 10: Commit file and create PR
     const prTitle = `Tests for issue #${issue.number}: ${issue.title}`;
-    const prBody = buildPRBody(issue, validationResult);
+    const prBody = buildPRBody(issue, validationResult, searchResults);
 
     // Reuse PR if one already exists for this issue
     const existingPr: ExistingPRInfo | null = await client.findExistingPR({ issueNumber: issue.number });
@@ -176,6 +200,7 @@ export async function processGitHubIssue(
 
     if (prUrl) {
       // Update existing branch with new test content
+      log("pr", `Updating existing PR: ${prUrl}`);
       const branchExists = await client.findBranch(branchName);
       if (!branchExists) {
         // Fall back to creating branch from base
@@ -202,7 +227,7 @@ export async function processGitHubIssue(
       // Refresh head SHA for check runs
       prHeadSha = await client.getBranchHeadSHA(branchName);
     } else {
-      console.log(`Creating PR for branch: ${branchName}`);
+      log("pr", `Creating PR on branch: ${branchName}`);
       const pr: CreateTestPRResult = await client.createTestPR({
         issueNumber: issue.number,
         branchName,
@@ -220,14 +245,18 @@ export async function processGitHubIssue(
     // Add PR label for visibility
     if (prNumber) {
       try {
+        log("label", "Adding 'tests-generated' label");
         await client.addLabel({ prNumber, label: "tests-generated" });
       } catch (labelErr: any) {
-        console.log(`Failed to add label: ${labelErr?.message}`);
+        log("label", `Failed: ${labelErr?.message}`);
       }
     }
 
     // Create check run with validation status
-    if (prHeadSha && validationResult.passed) {
+    const useCheckRuns = envBool("USE_CHECK_RUNS");
+    if (!useCheckRuns) {
+      log("check", "Skipping check run (PAT or checks disabled)");
+    } else if (prHeadSha && validationResult.passed) {
       const summary = validationResult.skipped
         ? `Validation skipped for ${validationResult.framework}`
         : `Validation passed in ${validationResult.attempts} attempt(s)`;
@@ -235,6 +264,7 @@ export async function processGitHubIssue(
         ? formatErrorSnippet(validationResult.lastError)
         : undefined;
       try {
+        log("check", "Creating check run");
         await client.createCheckRun({
           name: "StoryToTest",
           headSha: prHeadSha,
@@ -243,21 +273,22 @@ export async function processGitHubIssue(
           details,
         });
       } catch (checkErr: any) {
-        console.log(`Failed to create check run: ${checkErr?.message}`);
+        log("check", `Failed: ${checkErr?.message}`);
       }
     } else {
-      console.log("Skipping check run because validation did not pass or was skipped");
+      log("check", "Skipping (validation did not pass)");
     }
 
     // Step 11: Comment on issue with PR link and results
-    const issueComment = buildIssueComment(prUrl || "", validationResult);
+    log("comment", "Posting results to issue");
+    const issueComment = buildIssueComment(prUrl || "", validationResult, searchResults);
     await client.commentOnIssue(issue.number, issueComment);
 
-    console.log(`Workflow completed successfully for issue #${issue.number}`);
+    log("done", "Workflow completed successfully");
     return { success: true, prUrl };
   } catch (err: any) {
     const errorMessage = err?.message ?? "Unknown error";
-    console.log(`Workflow failed for issue #${issue.number}: ${errorMessage}`);
+    log("error", `Workflow failed: ${errorMessage}`);
 
     try {
       await client.commentOnIssue(
@@ -265,7 +296,7 @@ export async function processGitHubIssue(
         `Test generation failed: ${errorMessage}`,
       );
     } catch (commentErr: any) {
-      console.log(`Failed to comment on issue: ${commentErr?.message}`);
+      log("error", `Failed to post error comment: ${commentErr?.message}`);
     }
 
     return { success: false, error: errorMessage };
@@ -275,17 +306,20 @@ export async function processGitHubIssue(
 function buildPRBody(
   issue: GitHubIssue,
   validationResult: WorkflowValidationResult,
+  searchResults: SearchResult,
 ): string {
   const validationStatus = validationResult.skipped
-    ? `Skipped for framework ${validationResult.framework}`
+    ? `⏭️ Skipped for framework \`${validationResult.framework}\``
     : validationResult.passed
-      ? `Passed after ${validationResult.attempts} attempt(s)`
-      : `Did not pass after ${validationResult.attempts} attempt(s) - ${validationResult.lastError ?? "unknown error"}`;
+      ? `✅ Passed after ${validationResult.attempts} attempt(s)`
+      : `❌ Did not pass after ${validationResult.attempts} attempt(s)`;
 
   const errorSection =
     validationResult.skipped || validationResult.passed || !validationResult.lastError
       ? ""
       : `\n\n<details><summary>Last validation error</summary>\n\n${formatErrorSnippet(validationResult.lastError)}\n\n</details>`;
+
+  const componentNames = formatComponentNames(searchResults);
 
   return [
     `## Auto-generated Tests`,
@@ -296,6 +330,10 @@ function buildPRBody(
     ``,
     `**Validation:** ${validationStatus}` + errorSection,
     ``,
+    `### Matched Components`,
+    ``,
+    componentNames || "_None_",
+    ``,
     `### Issue Description`,
     ``,
     issue.body ?? "_No description provided._",
@@ -305,25 +343,47 @@ function buildPRBody(
 function buildIssueComment(
   prUrl: string,
   validationResult: WorkflowValidationResult,
+  searchResults: SearchResult,
 ): string {
   const status = validationResult.skipped
-    ? `generated (validation skipped for ${validationResult.framework}) and a pull request has been created`
+    ? `generated (validation skipped for \`${validationResult.framework}\`)`
     : validationResult.passed
-      ? "passed validation and a pull request has been created"
-      : "generated (validation did not pass) and a pull request has been created";
+      ? "passed validation"
+      : "generated (validation did not pass)";
+
+  const componentNames = formatComponentNames(searchResults);
+
+  const validationSummary = validationResult.skipped
+    ? `⏭️ Skipped (${validationResult.attempts} attempt)`
+    : validationResult.passed
+      ? `✅ Passed (${validationResult.attempts} attempt(s))`
+      : `❌ Failed (${validationResult.attempts} attempt(s))`;
 
   const errorSnippet = !validationResult.skipped && !validationResult.passed && validationResult.lastError
-    ? [``, `Last error:`, formatErrorSnippet(validationResult.lastError)].join("\n")
+    ? [``, `**Last error:**`, formatErrorSnippet(validationResult.lastError)].join("\n")
     : "";
 
   return [
-    `Tests have been ${status}.`,
+    `Tests have been ${status} and a pull request has been created.`,
     ``,
     `**PR:** ${prUrl}`,
-    ``,
-    `Validation attempts: ${validationResult.attempts}`,
+    componentNames ? `**Matched:** ${componentNames}` : "",
+    `**Validation:** ${validationSummary}`,
     errorSnippet,
-  ].join("\n");
+  ].filter(Boolean).join("\n");
+}
+
+function formatComponentNames(searchResults: SearchResult): string {
+  const parts: string[] = [];
+  const ifaceNames = searchResults.matchedInterfaces.map((i) => i.name);
+  const classNames = searchResults.matchedClasses.map((c) => c.name);
+  if (ifaceNames.length > 0) {
+    parts.push(`${ifaceNames.join(", ")} (interfaces)`);
+  }
+  if (classNames.length > 0) {
+    parts.push(`${classNames.join(", ")} (classes)`);
+  }
+  return parts.join("; ");
 }
 
 function formatErrorSnippet(error: string): string {
@@ -365,6 +425,70 @@ async function generateWithoutValidation(params: {
     skipped: true,
     framework: params.framework,
   };
+}
+
+function scaffoldVitest(workspacePath: string): void {
+  const configPath = path.join(workspacePath, "vitest.config.ts");
+  if (!fs.existsSync(configPath)) {
+    fs.writeFileSync(
+      configPath,
+      [
+        `import { defineConfig } from "vitest/config";`,
+        ``,
+        `export default defineConfig({`,
+        `  test: {`,
+        `    globals: true,`,
+        `  },`,
+        `});`,
+        ``,
+      ].join("\n"),
+      "utf-8",
+    );
+  }
+
+  const setupDir = path.join(workspacePath, "test");
+  const setupPath = path.join(setupDir, "setupTests.ts");
+  if (!fs.existsSync(setupPath)) {
+    if (!fs.existsSync(setupDir)) {
+      fs.mkdirSync(setupDir, { recursive: true });
+    }
+    fs.writeFileSync(
+      setupPath,
+      `// Minimal setup file scaffolded by StoryToTest\n`,
+      "utf-8",
+    );
+  }
+}
+
+function detectMissingValidationDeps(
+  workspacePath: string,
+  framework: TestFramework,
+): string[] {
+  const missing: string[] = [];
+  const pkgPath = path.join(workspacePath, "package.json");
+  let pkg: any = {};
+  try {
+    pkg = JSON.parse(fs.readFileSync(pkgPath, "utf-8"));
+  } catch {
+    return missing;
+  }
+
+  const hasDep = (name: string) =>
+    Boolean(pkg.dependencies?.[name] || pkg.devDependencies?.[name]);
+
+  const hasReact = hasDep("react");
+
+  // Vitest needs jsdom or happy-dom for DOM/React component tests
+  if (framework === "vitest" && hasReact && !hasDep("jsdom") && !hasDep("happy-dom")) {
+    missing.push("jsdom (or happy-dom)");
+  }
+
+  // React projects need @testing-library/react for component tests
+  if (hasReact && !hasDep("@testing-library/react")) {
+    missing.push("@testing-library/react");
+  }
+
+  return missing;
 }
 
 function normalizeOutputDir(outputDir?: string): string {
