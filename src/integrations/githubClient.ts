@@ -117,6 +117,9 @@ export class GitHubClient {
     }
   }
 
+  /**
+   * Creates or updates a file on a branch with the provided content and message.
+   */
   async commitFile(
     branchName: string,
     filePath: string,
@@ -142,6 +145,9 @@ export class GitHubClient {
     console.log(`File committed: ${filePath}`);
   }
 
+  /**
+   * Creates a pull request from head -> base and returns basic PR metadata.
+   */
   async createPullRequest(
     title: string,
     body: string,
@@ -177,6 +183,9 @@ export class GitHubClient {
     };
   }
 
+  /**
+   * Posts a comment on the given issue number.
+   */
   async commentOnIssue(issueNumber: number, comment: string): Promise<void> {
     if (this.dryRun) {
       console.log(`[dry-run][comment] Would comment on issue #${issueNumber}`);
@@ -193,6 +202,9 @@ export class GitHubClient {
     console.log(`Comment added to issue #${issueNumber}`);
   }
 
+  /**
+   * Finds an open PR whose title contains the issue number (e.g., "#123").
+   */
   async findExistingPR(options: ExistingPROptions): Promise<ExistingPRInfo | null> {
     const { issueNumber } = options;
     const { data } = await this.octokit.pulls.list({
@@ -217,6 +229,9 @@ export class GitHubClient {
     };
   }
 
+  /**
+   * Creates or reuses a branch, commits the test file, and opens a PR.
+   */
   async createTestPR(options: CreateTestPROptions): Promise<CreateTestPRResult> {
     console.log(`Starting test PR creation for issue #${options.issueNumber}`);
 
@@ -259,6 +274,9 @@ export class GitHubClient {
     return pr;
   }
 
+  /**
+   * Fetches PR metadata (URL, head ref/SHA, number) for an existing PR.
+   */
   async getPullRequest(prNumber: number): Promise<CreateTestPRResult> {
     const pr = await this.octokit.pulls.get({
       owner: this.owner,
@@ -273,6 +291,9 @@ export class GitHubClient {
     };
   }
 
+  /**
+   * Creates a GitHub Check Run on the given head SHA.
+   */
   async createCheckRun(options: CheckRunOptions): Promise<void> {
     if (this.dryRun) {
       console.log(`[dry-run][check] Would create check run: ${options.name}`);
@@ -293,6 +314,9 @@ export class GitHubClient {
     });
   }
 
+  /**
+   * Adds a label to a pull request (issues.addLabels on the PR number).
+   */
   async addLabel(options: LabelOptions): Promise<void> {
     if (this.dryRun) {
       console.log(`[dry-run][label] Would add label "${options.label}" to PR #${options.prNumber}`);

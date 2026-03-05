@@ -42,6 +42,11 @@ interface GeminiResponse {
   };
 }
 
+/**
+ * Routes a text generation request to the selected LLM provider.
+ * @param params provider, model, prompts, and optional baseUrl/temperature/maxTokens
+ * @returns generated text content from the provider
+ */
 export async function generateText(params: GenerateTextParams): Promise<string> {
   switch (params.provider) {
     case "openai":
@@ -53,6 +58,9 @@ export async function generateText(params: GenerateTextParams): Promise<string> 
   }
 }
 
+/**
+ * Calls OpenAI chat completions and extracts content.
+ */
 async function generateWithOpenAI(params: GenerateTextParams): Promise<string> {
   const endpoint = joinUrl(params.baseUrl || "https://api.openai.com/v1", "/chat/completions");
   const response = await fetch(endpoint, {
@@ -94,6 +102,9 @@ async function generateWithOpenAI(params: GenerateTextParams): Promise<string> {
   throw new Error("OpenAI response did not include generated text.");
 }
 
+/**
+ * Calls Anthropic Messages API and extracts text blocks.
+ */
 async function generateWithAnthropic(params: GenerateTextParams): Promise<string> {
   const endpoint = joinUrl(params.baseUrl || "https://api.anthropic.com/v1", "/messages");
   const response = await fetch(endpoint, {
@@ -131,6 +142,9 @@ async function generateWithAnthropic(params: GenerateTextParams): Promise<string
   return text;
 }
 
+/**
+ * Calls Gemini generateContent and extracts concatenated text parts.
+ */
 async function generateWithGemini(params: GenerateTextParams): Promise<string> {
   const endpointBase = params.baseUrl || "https://generativelanguage.googleapis.com/v1beta";
   const modelName = normalizeGeminiModelName(params.model);

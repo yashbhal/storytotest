@@ -14,6 +14,12 @@ export function normalizeProvider(
   provider: string | undefined,
   fallback: LLMProvider = DEFAULT_PROVIDER,
 ): LLMProvider {
+  /**
+   * Normalizes a provider string to a supported LLMProvider, falling back when unknown.
+   * @param provider provider name from config/user input
+   * @param fallback default provider to use when input is missing or unsupported
+   * @returns a supported provider id (openai | anthropic | gemini)
+   */
   if (!provider) {
     return fallback;
   }
@@ -25,6 +31,11 @@ export function normalizeProvider(
 }
 
 export function getDefaultModelForProvider(provider: LLMProvider): string {
+  /**
+   * Returns the default model name for the given provider.
+   * @param provider normalized provider id
+   * @returns default model string for that provider
+   */
   return DEFAULT_MODELS[provider];
 }
 

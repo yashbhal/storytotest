@@ -24,6 +24,13 @@ interface ValidateParams {
   progress?: { report: (info: { message?: string }) => void };
 }
 
+/**
+ * Generates a test, runs it, and retries with captured errors up to maxAttempts.
+ * - Writes temp test files inside testDir to keep imports correct during validation.
+ * - Feeds previous error output back into the generator to fix failures.
+ * @param params validation inputs (LLM config, search results, framework, imports, workspace/test dirs)
+ * @returns ValidationResult with code, filename, attempts, pass/fail, and lastError when failing
+ */
 export async function validateAndFixTest(params: ValidateParams): Promise<ValidationResult> {
   const {
     apiKey,
