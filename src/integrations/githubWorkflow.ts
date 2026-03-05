@@ -87,242 +87,62 @@ export async function processGitHubIssue(
   });
 
   try {
-    // ============================================================
-    // STEP 1: Extract Story from Issue
-    // ============================================================
-    log("start", `Processing: ${issue.title}${config.dryRun ? " (dry-run)" : ""}`);
-    const storyText = [issue.title, issue.body ?? ""].join("\n").trim();
+    const storyText = buildStoryText(issue, config, log);
+    const frameworkInfo = determineFramework(config, log);
+    const llmConfig = prepareLLMConfig(config);
 
-    // ============================================================
-    // STEP 2: Detect Test Framework
-    // ============================================================
-    log("detect", `workspace: ${config.workspaceRoot}`);
-    let framework = detectFramework(config.workspaceRoot);
-    log("detect", `framework: ${framework}`);
+    const context = await collectContextForIssue({
+      config,
+      storyText,
+      log,
+    });
 
-    if (framework === "unknown" && envBool("ALLOW_SCAFFOLD_VITEST")) {
-      log("scaffold", "No framework detected — scaffolding minimal Vitest config");
-      scaffoldVitest(config.workspaceRoot);
-      framework = "vitest";
-    } else if (framework === "unknown") {
-      log("detect", "No framework detected (set ALLOW_SCAFFOLD_VITEST=true to auto-scaffold)");
+    const hasMatches =
+      context.searchResults.matchedInterfaces.length > 0 ||
+      context.searchResults.matchedClasses.length > 0;
+
+    if (!hasMatches) {
+      return await handleNoMatches(issue, client, context.parsedStory, log);
     }
 
-    const shouldValidate = framework === "jest" || framework === "vitest";
-    const provider = normalizeProvider(config.llmProvider, "openai");
-    const model = config.llmModel || getDefaultModelForProvider(provider);
-    const baseUrl = config.llmBaseUrl;
+    const validationResult = await generateAndValidate({
+      issue,
+      config,
+      storyText,
+      frameworkInfo,
+      llmConfig,
+      context,
+      log,
+    });
 
-    // ============================================================
-    // STEP 3: Index Codebase
-    // ============================================================
-    log("index", "Indexing codebase");
-    const codebaseIndex = await indexCodebase(config.workspaceRoot);
+    const prOutcome = await upsertPullRequest({
+      issue,
+      config,
+      client,
+      validationResult,
+      searchResults: context.searchResults,
+      log,
+    });
 
-    // ============================================================
-    // STEP 4: Parse Story Entities
-    // ============================================================
-    log("parse", "Parsing story entities");
-    const parsedStory = parseStory(storyText);
-    log("parse", `entities: ${parsedStory.entities.join(", ")}`);
+    await maybeLabelPullRequest({ client, prNumber: prOutcome.prNumber, log });
+    await maybeCreateCheckRun({
+      client,
+      validationResult,
+      prHeadSha: prOutcome.prHeadSha,
+      log,
+    });
 
-    // ============================================================
-    // STEP 5: Search for Matching Components
-    // ============================================================
-    log("search", "Searching for matching components");
-    const searchResults = searchComponents(codebaseIndex, parsedStory.entities);
-    log("search", `Matched ${searchResults.matchedInterfaces.length} interfaces, ${searchResults.matchedClasses.length} classes`);
-
-    if (
-      searchResults.matchedInterfaces.length === 0 &&
-      searchResults.matchedClasses.length === 0
-    ) {
-      const message = "No matching components found; skipping PR creation.";
-      log("search", message);
-      await client.commentOnIssue(
-        issue.number,
-        [
-          message,
-          "",
-          "Story parsed entities:",
-          parsedStory.entities.length ? parsedStory.entities.join(", ") : "<none>",
-        ].join("\n"),
-      );
-      return { success: false, error: message };
-    }
-
-    // ============================================================
-    // STEP 6-7: Generate and Validate Test Code
-    // ============================================================
-    const outputDir = normalizeOutputDir(config.testOutputDir);
-    const testDir = path.join(config.workspaceRoot, outputDir);
-    const imports = searchResults.matchedInterfaces
-      .filter((iface) => iface.isExported)
-      .map((iface) => resolveImport(iface, testDir));
-
-    log("generate", "Generating and validating tests");
-
-    const missingDeps = shouldValidate
-      ? detectMissingValidationDeps(config.workspaceRoot, framework)
-      : [];
-
-    let validationResult: WorkflowValidationResult;
-
-    if (shouldValidate && missingDeps.length === 0) {
-      validationResult = {
-        ...(await validateAndFixTest({
-          apiKey: config.llmApiKey,
-          model,
-          provider,
-          baseUrl,
-          userStory: storyText,
-          searchResults,
-          testDir,
-          framework,
-          imports,
-          workspacePath: config.workspaceRoot,
-          maxAttempts: config.maxAttempts ?? 3,
-        })),
-        skipped: false,
-        framework,
-      };
-    } else {
-      if (missingDeps.length > 0) {
-        log("validate", `Skipping — missing deps: ${missingDeps.join(", ")}`);
-      }
-      const generated = await generateWithoutValidation({
-        apiKey: config.llmApiKey,
-        model,
-        provider,
-        baseUrl,
-        userStory: storyText,
-        searchResults,
-        testDir,
-        framework,
-        imports,
-      });
-      validationResult = missingDeps.length > 0
-        ? { ...generated, lastError: `Missing validation deps: ${missingDeps.join(", ")}` }
-        : generated;
-    }
-
-    log("validate", `passed=${validationResult.passed}, attempts=${validationResult.attempts}`);
-
-    // ============================================================
-    // STEP 8: Prepare Branch and File Paths
-    // ============================================================
-    let branchName = `test/issue-${issue.number}`;
-    const testFilePath = path.posix.join(outputDir, validationResult.fileName);
-
-    // ============================================================
-    // STEP 9-10: Create/Update PR with Test File
-    // ============================================================
-    const prTitle = `Tests for issue #${issue.number}: ${issue.title}`;
-    const prBody = buildPRBody(issue, validationResult, searchResults);
-
-    // Reuse PR if one already exists for this issue
-    const existingPr: ExistingPRInfo | null = await client.findExistingPR({ issueNumber: issue.number });
-    let prUrl: string | null = existingPr?.url || null;
-    let prHeadSha: string | undefined = existingPr?.headSha;
-    let prNumber: number | undefined = existingPr?.number;
-    if (existingPr?.headRef) {
-      branchName = existingPr.headRef;
-    }
-
-    if (prUrl) {
-      // Update existing branch with new test content
-      log("pr", `Updating existing PR: ${prUrl}`);
-      const branchExists = await client.findBranch(branchName);
-      if (!branchExists) {
-        // Fall back to creating branch from base
-        const base = config.baseBranch || "main";
-        let baseSHA: string;
-        try {
-          baseSHA = await client.getDefaultBranchSHA(base);
-        } catch (err: any) {
-          if (base !== "master") {
-            baseSHA = await client.getDefaultBranchSHA("master");
-          } else {
-            throw err;
-          }
-        }
-        await client.createBranch(branchName, baseSHA);
-      }
-      await client.commitFile(
-        branchName,
-        testFilePath,
-        validationResult.code,
-        `Update generated tests for issue #${issue.number}`,
-      );
-
-      // Refresh head SHA for check runs
-      prHeadSha = await client.getBranchHeadSHA(branchName);
-    } else {
-      log("pr", `Creating PR on branch: ${branchName}`);
-      const pr: CreateTestPRResult = await client.createTestPR({
-        issueNumber: issue.number,
-        branchName,
-        filePath: testFilePath,
-        fileContent: validationResult.code,
-        prTitle,
-        prBody,
-        baseBranch: config.baseBranch,
-      });
-      prUrl = pr.url;
-      prHeadSha = pr.headSha;
-      prNumber = pr.number;
-    }
-
-    // ============================================================
-    // STEP 11: Add Label to PR
-    // ============================================================
-    if (prNumber) {
-      try {
-        log("label", "Adding 'tests-generated' label");
-        await client.addLabel({ prNumber, label: "tests-generated" });
-      } catch (labelErr: any) {
-        log("label", `Failed: ${labelErr?.message}`);
-      }
-    }
-
-    // ============================================================
-    // STEP 12: Create Check Run (Optional)
-    // ============================================================
-    const useCheckRuns = envBool("USE_CHECK_RUNS");
-    if (!useCheckRuns) {
-      log("check", "Skipping check run (PAT or checks disabled)");
-    } else if (prHeadSha && validationResult.passed) {
-      const summary = validationResult.skipped
-        ? `Validation skipped for ${validationResult.framework}`
-        : `Validation passed in ${validationResult.attempts} attempt(s)`;
-      const details = !validationResult.skipped && validationResult.lastError
-        ? formatErrorSnippet(validationResult.lastError)
-        : undefined;
-      try {
-        log("check", "Creating check run");
-        await client.createCheckRun({
-          name: "StoryToTest",
-          headSha: prHeadSha,
-          conclusion: "success",
-          summary,
-          details,
-        });
-      } catch (checkErr: any) {
-        log("check", `Failed: ${checkErr?.message}`);
-      }
-    } else {
-      log("check", "Skipping (validation did not pass)");
-    }
-
-    // ============================================================
-    // STEP 13: Comment on Issue with Results
-    // ============================================================
-    log("comment", "Posting results to issue");
-    const issueComment = buildIssueComment(prUrl || "", validationResult, searchResults);
-    await client.commentOnIssue(issue.number, issueComment);
+    await commentOnIssueWithResults({
+      client,
+      issue,
+      prUrl: prOutcome.prUrl,
+      validationResult,
+      searchResults: context.searchResults,
+      log,
+    });
 
     log("done", "Workflow completed successfully");
-    return { success: true, prUrl };
+    return { success: true, prUrl: prOutcome.prUrl || undefined };
   } catch (err: any) {
     const errorMessage = err?.message ?? "Unknown error";
     log("error", `Workflow failed: ${errorMessage}`);
@@ -340,16 +160,364 @@ export async function processGitHubIssue(
   }
 }
 
+/**
+ * Build the story text from the GitHub issue title and body.
+ * 
+ * @param issue - GitHub issue
+ * @param config - Workflow configuration
+ * @param log - Logging function
+ * @returns Story text
+ */
+function buildStoryText(
+  issue: GitHubIssue,
+  config: WorkflowConfig,
+  log: (step: string, msg: string) => void,
+): string {
+  log("start", `Processing: ${issue.title}${config.dryRun ? " (dry-run)" : ""}`);
+  return [issue.title, issue.body ?? ""].join("\n").trim();
+}
+
+/**
+ * Detect the repository's test framework and decide whether validation should run.
+ * 
+ * @param config - Workflow configuration
+ * @param log - Logging function
+ * @returns Framework information
+ */
+function determineFramework(
+  config: WorkflowConfig,
+  log: (step: string, msg: string) => void,
+): { framework: TestFramework; shouldValidate: boolean } {
+  log("detect", `workspace: ${config.workspaceRoot}`);
+  let framework = detectFramework(config.workspaceRoot);
+  log("detect", `framework: ${framework}`);
+
+  if (framework === "unknown" && envBool("ALLOW_SCAFFOLD_VITEST")) {
+    log("scaffold", "No framework detected — scaffolding minimal Vitest config");
+    scaffoldVitest(config.workspaceRoot);
+    framework = "vitest";
+  } else if (framework === "unknown") {
+    log("detect", "No framework detected (set ALLOW_SCAFFOLD_VITEST=true to auto-scaffold)");
+  }
+
+  const shouldValidate = framework === "jest" || framework === "vitest";
+  return { framework, shouldValidate };
+}
+
+function prepareLLMConfig(config: WorkflowConfig): {
+  provider: LLMProvider;
+  model: string;
+  baseUrl?: string;
+} {
+  const provider = normalizeProvider(config.llmProvider, "openai");
+  const model = config.llmModel || getDefaultModelForProvider(provider);
+  const baseUrl = config.llmBaseUrl;
+  return { provider, model, baseUrl };
+}
+
+/**
+ * Build the code-search context: index workspace, parse story, and resolve imports.
+ */
+async function collectContextForIssue(params: {
+  config: WorkflowConfig;
+  storyText: string;
+  log: (step: string, msg: string) => void;
+}): Promise<{
+  parsedStory: ReturnType<typeof parseStory>;
+  searchResults: SearchResult;
+  imports: string[];
+  outputDir: string;
+  testDir: string;
+}> {
+  const { config, storyText, log } = params;
+
+  log("index", "Indexing codebase");
+  const codebaseIndex = await indexCodebase(config.workspaceRoot);
+
+  log("parse", "Parsing story entities");
+  const parsedStory = parseStory(storyText);
+  log("parse", `entities: ${parsedStory.entities.join(", ")}`);
+
+  log("search", "Searching for matching components");
+  const searchResults = searchComponents(codebaseIndex, parsedStory.entities);
+  log(
+    "search",
+    `Matched ${searchResults.matchedInterfaces.length} interfaces, ${searchResults.matchedClasses.length} classes`,
+  );
+
+  const outputDir = normalizeOutputDir(config.testOutputDir);
+  const testDir = path.join(config.workspaceRoot, outputDir);
+  const imports = searchResults.matchedInterfaces
+    .filter((iface) => iface.isExported)
+    .map((iface) => resolveImport(iface, testDir));
+
+  return { parsedStory, searchResults, imports, outputDir, testDir };
+}
+
+/**
+ * Post a comment and short-circuit the workflow when no components match the story.
+ */
+async function handleNoMatches(
+  issue: GitHubIssue,
+  client: GitHubClient,
+  parsedStory: ReturnType<typeof parseStory>,
+  log: (step: string, msg: string) => void,
+): Promise<WorkflowResult> {
+  const message = "No matching components found; skipping PR creation.";
+  log("search", message);
+  await client.commentOnIssue(
+    issue.number,
+    [
+      message,
+      "",
+      "Story parsed entities:",
+      parsedStory.entities.length ? parsedStory.entities.join(", ") : "<none>",
+    ].join("\n"),
+  );
+  return { success: false, error: message };
+}
+
+/**
+ * Generate tests (with validation when possible) and return the validation outcome.
+ */
+async function generateAndValidate(params: {
+  issue: GitHubIssue;
+  config: WorkflowConfig;
+  storyText: string;
+  frameworkInfo: { framework: TestFramework; shouldValidate: boolean };
+  llmConfig: { provider: LLMProvider; model: string; baseUrl?: string };
+  context: {
+    parsedStory: ReturnType<typeof parseStory>;
+    searchResults: SearchResult;
+    imports: string[];
+    outputDir: string;
+    testDir: string;
+  };
+  log: (step: string, msg: string) => void;
+}): Promise<WorkflowValidationResult> {
+  const { config, storyText, frameworkInfo, llmConfig, context, log } = params;
+  const { framework, shouldValidate } = frameworkInfo;
+
+  log("generate", "Generating and validating tests");
+  const missingDeps = shouldValidate
+    ? detectMissingValidationDeps(config.workspaceRoot, framework)
+    : [];
+
+  if (shouldValidate && missingDeps.length === 0) {
+    return {
+      ...(await validateAndFixTest({
+        apiKey: config.llmApiKey,
+        model: llmConfig.model,
+        provider: llmConfig.provider,
+        baseUrl: llmConfig.baseUrl,
+        userStory: storyText,
+        searchResults: context.searchResults,
+        testDir: context.testDir,
+        framework,
+        imports: context.imports,
+        workspacePath: config.workspaceRoot,
+        maxAttempts: config.maxAttempts ?? 3,
+      })),
+      skipped: false,
+      framework,
+    };
+  }
+
+  if (missingDeps.length > 0) {
+    log("validate", `Skipping — missing deps: ${missingDeps.join(", ")}`);
+  }
+
+  const generated = await generateWithoutValidation({
+    apiKey: config.llmApiKey,
+    model: llmConfig.model,
+    provider: llmConfig.provider,
+    baseUrl: llmConfig.baseUrl,
+    userStory: storyText,
+    searchResults: context.searchResults,
+    testDir: context.testDir,
+    framework,
+    imports: context.imports,
+  });
+
+  return missingDeps.length > 0
+    ? { ...generated, lastError: `Missing validation deps: ${missingDeps.join(", ")}` }
+    : generated;
+}
+
+/**
+ * Create or update a PR containing the generated test file.
+ */
+async function upsertPullRequest(params: {
+  issue: GitHubIssue;
+  config: WorkflowConfig;
+  client: GitHubClient;
+  validationResult: WorkflowValidationResult;
+  searchResults: SearchResult;
+  log: (step: string, msg: string) => void;
+}): Promise<{ prUrl: string | null; prHeadSha?: string; prNumber?: number }> {
+  const { issue, config, client, validationResult, searchResults, log } = params;
+
+  let branchName = `test/issue-${issue.number}`;
+  const testFilePath = path.posix.join(normalizeOutputDir(config.testOutputDir), validationResult.fileName);
+
+  const prTitle = `Tests for issue #${issue.number}: ${issue.title}`;
+  const prBody = buildPRBody(issue, validationResult, searchResults);
+
+  const existingPr: ExistingPRInfo | null = await client.findExistingPR({ issueNumber: issue.number });
+  let prUrl: string | null = existingPr?.url || null;
+  let prHeadSha: string | undefined = existingPr?.headSha;
+  let prNumber: number | undefined = existingPr?.number;
+  if (existingPr?.headRef) {
+    branchName = existingPr.headRef;
+  }
+
+  if (prUrl) {
+    log("pr", `Updating existing PR: ${prUrl}`);
+    await ensureBranchExists({ branchName, client, baseBranch: config.baseBranch, log });
+    await client.commitFile(
+      branchName,
+      testFilePath,
+      validationResult.code,
+      `Update generated tests for issue #${issue.number}`,
+    );
+    prHeadSha = await client.getBranchHeadSHA(branchName);
+  } else {
+    log("pr", `Creating PR on branch: ${branchName}`);
+    const pr: CreateTestPRResult = await client.createTestPR({
+      issueNumber: issue.number,
+      branchName,
+      filePath: testFilePath,
+      fileContent: validationResult.code,
+      prTitle,
+      prBody,
+      baseBranch: config.baseBranch,
+    });
+    prUrl = pr.url;
+    prHeadSha = pr.headSha;
+    prNumber = pr.number;
+  }
+
+  return { prUrl, prHeadSha, prNumber };
+}
+
+/**
+ * Ensure a working branch exists; create from base when absent.
+ */
+async function ensureBranchExists(params: {
+  branchName: string;
+  client: GitHubClient;
+  baseBranch?: string;
+  log: (step: string, msg: string) => void;
+}): Promise<void> {
+  const { branchName, client, baseBranch, log } = params;
+  const branchExists = await client.findBranch(branchName);
+  if (branchExists) return;
+
+  const base = baseBranch || "main";
+  let baseSHA: string;
+  try {
+    baseSHA = await client.getDefaultBranchSHA(base);
+  } catch (err: any) {
+    if (base !== "master") {
+      baseSHA = await client.getDefaultBranchSHA("master");
+    } else {
+      throw err;
+    }
+  }
+
+  log("branch", `Creating branch ${branchName} from ${base}`);
+  await client.createBranch(branchName, baseSHA);
+}
+
+/**
+ * Optionally add a label to the PR when a number is present.
+ */
+async function maybeLabelPullRequest(params: {
+  client: GitHubClient;
+  prNumber?: number;
+  log: (step: string, msg: string) => void;
+}): Promise<void> {
+  const { client, prNumber, log } = params;
+  if (!prNumber) return;
+
+  try {
+    log("label", "Adding 'tests-generated' label");
+    await client.addLabel({ prNumber, label: "tests-generated" });
+  } catch (labelErr: any) {
+    log("label", `Failed: ${labelErr?.message}`);
+  }
+}
+
+/**
+ * Optionally create a GitHub Check Run when validation passes and checks are enabled.
+ */
+async function maybeCreateCheckRun(params: {
+  client: GitHubClient;
+  validationResult: WorkflowValidationResult;
+  prHeadSha?: string;
+  log: (step: string, msg: string) => void;
+}): Promise<void> {
+  const { client, validationResult, prHeadSha, log } = params;
+  const useCheckRuns = envBool("USE_CHECK_RUNS");
+
+  if (!useCheckRuns) {
+    log("check", "Skipping check run (PAT or checks disabled)");
+    return;
+  }
+
+  if (!prHeadSha || !validationResult.passed) {
+    log("check", "Skipping (validation did not pass)");
+    return;
+  }
+
+  const summary = validationResult.skipped
+    ? `Validation skipped for ${validationResult.framework}`
+    : `Validation passed in ${validationResult.attempts} attempt(s)`;
+  const details = !validationResult.skipped && validationResult.lastError
+    ? formatErrorSnippet(validationResult.lastError)
+    : undefined;
+
+  try {
+    log("check", "Creating check run");
+    await client.createCheckRun({
+      name: "StoryToTest",
+      headSha: prHeadSha,
+      conclusion: "success",
+      summary,
+      details,
+    });
+  } catch (checkErr: any) {
+    log("check", `Failed: ${checkErr?.message}`);
+  }
+}
+
+/**
+ * Post a summary comment on the originating issue with validation and PR info.
+ */
+async function commentOnIssueWithResults(params: {
+  client: GitHubClient;
+  issue: GitHubIssue;
+  prUrl: string | null;
+  validationResult: WorkflowValidationResult;
+  searchResults: SearchResult;
+  log: (step: string, msg: string) => void;
+}): Promise<void> {
+  const { client, issue, prUrl, validationResult, searchResults, log } = params;
+  log("comment", "Posting results to issue");
+  const issueComment = buildIssueComment(prUrl || "", validationResult, searchResults);
+  await client.commentOnIssue(issue.number, issueComment);
+}
+
 function buildPRBody(
   issue: GitHubIssue,
   validationResult: WorkflowValidationResult,
   searchResults: SearchResult,
 ): string {
   const validationStatus = validationResult.skipped
-    ? `⏭️ Skipped for framework \`${validationResult.framework}\``
+    ? `⏭ Skipped for framework \`${validationResult.framework}\``
     : validationResult.passed
-      ? `✅ Passed after ${validationResult.attempts} attempt(s)`
-      : `❌ Did not pass after ${validationResult.attempts} attempt(s)`;
+      ? `Passed after ${validationResult.attempts} attempt(s)`
+      : `Did not pass after ${validationResult.attempts} attempt(s)`;
 
   const errorSection =
     validationResult.skipped || validationResult.passed || !validationResult.lastError
@@ -391,10 +559,10 @@ function buildIssueComment(
   const componentNames = formatComponentNames(searchResults);
 
   const validationSummary = validationResult.skipped
-    ? `⏭️ Skipped (${validationResult.attempts} attempt)`
+    ? `⏭ Skipped (${validationResult.attempts} attempt)`
     : validationResult.passed
-      ? `✅ Passed (${validationResult.attempts} attempt(s))`
-      : `❌ Failed (${validationResult.attempts} attempt(s))`;
+      ? ` Passed (${validationResult.attempts} attempt(s))`
+      : ` Failed (${validationResult.attempts} attempt(s))`;
 
   const errorSnippet = !validationResult.skipped && !validationResult.passed && validationResult.lastError
     ? [``, `**Last error:**`, formatErrorSnippet(validationResult.lastError)].join("\n")
