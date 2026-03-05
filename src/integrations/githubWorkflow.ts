@@ -57,6 +57,21 @@ interface WorkflowValidationResult {
   framework: TestFramework;
 }
 
+/**
+ * Main workflow orchestrator that processes a GitHub issue and generates tests.
+ * 
+ * @param issue - GitHub issue containing the user story
+ * @param config - Workflow configuration (tokens, paths, LLM settings)
+ * @returns Result with success status and PR URL if successful
+ * 
+ * @example
+ * ```typescript
+ * const result = await processGitHubIssue(
+ *   { number: 42, title: "Add tests", body: "...", html_url: "..." },
+ *   { workspaceRoot: "/path", githubToken: "...", ... }
+ * );
+ * ```
+ */
 export async function processGitHubIssue(
   issue: GitHubIssue,
   config: WorkflowConfig,
@@ -72,11 +87,15 @@ export async function processGitHubIssue(
   });
 
   try {
-    // Step 1: Extract story from issue
+    // ============================================================
+    // STEP 1: Extract Story from Issue
+    // ============================================================
     log("start", `Processing: ${issue.title}${config.dryRun ? " (dry-run)" : ""}`);
     const storyText = [issue.title, issue.body ?? ""].join("\n").trim();
 
-    // Step 2: Detect test framework
+    // ============================================================
+    // STEP 2: Detect Test Framework
+    // ============================================================
     log("detect", `workspace: ${config.workspaceRoot}`);
     let framework = detectFramework(config.workspaceRoot);
     log("detect", `framework: ${framework}`);
@@ -94,16 +113,22 @@ export async function processGitHubIssue(
     const model = config.llmModel || getDefaultModelForProvider(provider);
     const baseUrl = config.llmBaseUrl;
 
-    // Step 3: Index codebase
+    // ============================================================
+    // STEP 3: Index Codebase
+    // ============================================================
     log("index", "Indexing codebase");
     const codebaseIndex = await indexCodebase(config.workspaceRoot);
 
-    // Step 4: Parse story entities
+    // ============================================================
+    // STEP 4: Parse Story Entities
+    // ============================================================
     log("parse", "Parsing story entities");
     const parsedStory = parseStory(storyText);
     log("parse", `entities: ${parsedStory.entities.join(", ")}`);
 
-    // Step 5: Search for matching components
+    // ============================================================
+    // STEP 5: Search for Matching Components
+    // ============================================================
     log("search", "Searching for matching components");
     const searchResults = searchComponents(codebaseIndex, parsedStory.entities);
     log("search", `Matched ${searchResults.matchedInterfaces.length} interfaces, ${searchResults.matchedClasses.length} classes`);
@@ -126,7 +151,9 @@ export async function processGitHubIssue(
       return { success: false, error: message };
     }
 
-    // Step 6 and 7: Generate and validate test code (up to 3 attempts)
+    // ============================================================
+    // STEP 6-7: Generate and Validate Test Code
+    // ============================================================
     const outputDir = normalizeOutputDir(config.testOutputDir);
     const testDir = path.join(config.workspaceRoot, outputDir);
     const imports = searchResults.matchedInterfaces
@@ -181,11 +208,15 @@ export async function processGitHubIssue(
 
     log("validate", `passed=${validationResult.passed}, attempts=${validationResult.attempts}`);
 
-    // Step 8: Create GitHub branch
+    // ============================================================
+    // STEP 8: Prepare Branch and File Paths
+    // ============================================================
     let branchName = `test/issue-${issue.number}`;
     const testFilePath = path.posix.join(outputDir, validationResult.fileName);
 
-    // Steps 9 and 10: Commit file and create PR
+    // ============================================================
+    // STEP 9-10: Create/Update PR with Test File
+    // ============================================================
     const prTitle = `Tests for issue #${issue.number}: ${issue.title}`;
     const prBody = buildPRBody(issue, validationResult, searchResults);
 
@@ -242,7 +273,9 @@ export async function processGitHubIssue(
       prNumber = pr.number;
     }
 
-    // Add PR label for visibility
+    // ============================================================
+    // STEP 11: Add Label to PR
+    // ============================================================
     if (prNumber) {
       try {
         log("label", "Adding 'tests-generated' label");
@@ -252,7 +285,9 @@ export async function processGitHubIssue(
       }
     }
 
-    // Create check run with validation status
+    // ============================================================
+    // STEP 12: Create Check Run (Optional)
+    // ============================================================
     const useCheckRuns = envBool("USE_CHECK_RUNS");
     if (!useCheckRuns) {
       log("check", "Skipping check run (PAT or checks disabled)");
@@ -279,7 +314,9 @@ export async function processGitHubIssue(
       log("check", "Skipping (validation did not pass)");
     }
 
-    // Step 11: Comment on issue with PR link and results
+    // ============================================================
+    // STEP 13: Comment on Issue with Results
+    // ============================================================
     log("comment", "Posting results to issue");
     const issueComment = buildIssueComment(prUrl || "", validationResult, searchResults);
     await client.commentOnIssue(issue.number, issueComment);

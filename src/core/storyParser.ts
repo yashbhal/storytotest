@@ -2,6 +2,18 @@ import { ParsedStory } from "./types";
 
 export { ParsedStory };
 
+/**
+ * Extracts meaningful entities and actions from a user story.
+ * 
+ * @param storyText - Natural language user story (issue title + body)
+ * @returns Parsed story with extracted entities and action verbs
+ * 
+ * @example
+ * ```typescript
+ * const parsed = parseStory('As a user, I want to view the "BlogCard" component');
+ * // Returns: { rawText: '...', entities: ['user', 'view', 'blogcard', 'component'], actions: ['view'] }
+ * ```
+ */
 export function parseStory(storyText: string): ParsedStory {
   const entities: string[] = [];
   const actions: string[] = [];
