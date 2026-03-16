@@ -5,18 +5,8 @@ import { resolveLLMEnvConfig } from "../../src/llm/env";
 import { envBool, envString } from "../../src/integrations/envHelper";
 import { WaitUntilFn, readRawBody, parseJson, ensureWorkspace, resolveWaitUntil } from "./webhookUtils";
 
-function safeEqual(a: string, b: string): boolean {
-  const aBuffer = Buffer.from(a, "utf-8");
-  const bBuffer = Buffer.from(b, "utf-8");
-
-  if (aBuffer.length !== bBuffer.length) {
-    return false;
-  }
-
-  return crypto.timingSafeEqual(aBuffer, bBuffer);
-}
-
-function verifySignature(
+// Linear sends a raw hex HMAC-SHA256 digest (no "sha256=" prefix).
+function verifyLinearSignature(
   secret: string | undefined,
   rawBody: string,
   signature: string | undefined,
@@ -28,10 +18,28 @@ function verifySignature(
     return false;
   }
 
-  const expectedSignature =
-    "sha256=" + crypto.createHmac("sha256", secret).update(rawBody).digest("hex");
+  const computedSignature = crypto
+    .createHmac("sha256", secret)
+    .update(rawBody)
+    .digest();
 
-  return safeEqual(expectedSignature, signature);
+  const headerSignature = Buffer.from(signature, "hex");
+
+  if (computedSignature.length !== headerSignature.length) {
+    return false;
+  }
+
+  return crypto.timingSafeEqual(computedSignature, headerSignature);
+}
+
+// Parse the numeric part of a Linear identifier, e.g. "ENG-42" -> 42.
+function parseIdentifierNumber(identifier: string | undefined): number {
+  if (!identifier) {
+    return 0;
+  }
+  const parts = identifier.split("-");
+  const numeric = parseInt(parts[parts.length - 1], 10);
+  return Number.isNaN(numeric) ? 0 : numeric;
 }
 
 
@@ -47,31 +55,40 @@ export default async function handler(
 
   const rawBody = await readRawBody(req);
   const payload = (req as any).body ?? parseJson(rawBody);
-  const signatureHeader = req.headers["x-hub-signature-256"];
+  const signatureHeader = req.headers["linear-signature"];
   const signature = Array.isArray(signatureHeader)
     ? signatureHeader[0]
     : signatureHeader;
-  const webhookSecret = envString("GITHUB_WEBHOOK_SECRET") || envString("WEBHOOK_SECRET");
+  const webhookSecret = envString("LINEAR_WEBHOOK_SECRET");
 
   if (webhookSecret) {
-    if (!verifySignature(webhookSecret, rawBody, signature)) {
+    if (!verifyLinearSignature(webhookSecret, rawBody, signature)) {
       res.writeHead(401, { "Content-Type": "application/json" });
       res.end(JSON.stringify({ message: "Invalid webhook signature" }));
       return;
     }
   } else {
-    console.log("[webhook] GITHUB_WEBHOOK_SECRET/WEBHOOK_SECRET not set; skipping signature verification");
+    console.log("[webhook] LINEAR_WEBHOOK_SECRET not set; skipping signature verification");
   }
 
-  const { action, label, issue } = payload;
+  const { action, type, data, updatedFrom } = payload;
 
-  if (!issue) {
+  if (!data) {
     res.writeHead(400, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ message: "No issue in payload" }));
+    res.end(JSON.stringify({ message: "No data in payload" }));
     return;
   }
 
-  if (action !== "labeled" || label?.name !== "ready-for-tests") {
+  const triggerState = envString("LINEAR_TRIGGER_STATE", "Done");
+
+  // Only act on Issue update events where the state specifically changed to the trigger state.
+  // updatedFrom.stateId being present confirms the state field was the one updated.
+  if (
+    action !== "update" ||
+    type !== "Issue" ||
+    data?.state?.name !== triggerState ||
+    updatedFrom?.stateId === undefined
+  ) {
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ message: "Event ignored" }));
     return;
@@ -90,11 +107,13 @@ export default async function handler(
     return;
   }
 
+  const issueNumber = parseIdentifierNumber(data.identifier as string | undefined);
+
   // Ensure workspace exists for serverless environments
   try {
-    ensureWorkspace(workspaceRoot, githubOwner, githubRepo, githubToken, issue.number as number);
+    ensureWorkspace(workspaceRoot, githubOwner, githubRepo, githubToken, issueNumber);
   } catch (wsErr: any) {
-    console.log(`[issue #${issue.number}][workspace] ${wsErr.message}`);
+    console.log(`[issue #${issueNumber}][workspace] ${wsErr.message}`);
     res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ message: wsErr.message }));
     return;
@@ -113,10 +132,10 @@ export default async function handler(
   };
 
   const githubIssue = {
-    number: issue.number as number,
-    title: issue.title as string,
-    body: issue.body as string | null,
-    html_url: issue.html_url as string,
+    number: issueNumber,
+    title: data.title as string,
+    body: (data.description as string | null | undefined) ?? null,
+    html_url: (data.url as string | undefined) || (payload.url as string),
   };
 
   const task = processGitHubIssue(githubIssue, config);
