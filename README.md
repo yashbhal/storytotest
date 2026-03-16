@@ -42,7 +42,7 @@ Generate tests from a user story by scanning your TypeScript project. The extens
 ## Deploy
 Deploy the webhook handlers to Vercel. Both the GitHub and Linear webhook handlers run the full test generation pipeline. Deploy your own instance to Vercel with one click.
 
-[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fyashbhal%2Fstorytotest&env=GITHUB_TOKEN,GITHUB_OWNER,GITHUB_REPO,LLM_API_KEY,WEBHOOK_SECRET)
+[![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fyashbhal%2Fstorytotest&env=GITHUB_TOKEN,GITHUB_OWNER,GITHUB_REPO,LLM_API_KEY,WEBHOOK_SECRET,LINEAR_WEBHOOK_SECRET,LINEAR_TRIGGER_STATE)
 
 Required environment variables for the webhook:
 - `GITHUB_TOKEN`, `GITHUB_OWNER`, `GITHUB_REPO`
@@ -85,6 +85,7 @@ Additional Linear-specific env vars:
   - `ANTHROPIC_BASE_URL`
   - `GEMINI_BASE_URL`
 - `DRY_RUN`: Set to `true` to enable demo mode (runs full workflow but skips GitHub writes, logs intended actions instead)
+- `USE_CHECK_RUNS`: Enable GitHub Check Runs when validation passes (requires token scope for checks)
 
 ## Validation loop
 - Supports Jest and Vitest. Playwright and unknown frameworks skip validation with a warning (generation only).
