@@ -11,8 +11,8 @@ interface WebhookServerConfig extends WorkflowConfig {
 }
 
 function verifySignature(secret: string | undefined, body: string, signature: string | undefined): boolean {
-  if (!secret) return true; // allow when no secret configured
-  if (!signature) return false;
+  if (!secret) {return true;} // allow when no secret configured
+  if (!signature) {return false;}
   const hmac = crypto.createHmac("sha256", secret);
   const digest = "sha256=" + hmac.update(body).digest("hex");
   // Use constant-time comparison
@@ -20,7 +20,7 @@ function verifySignature(secret: string | undefined, body: string, signature: st
 }
 
 function parseIssuePayload(payload: any): GitHubIssue | null {
-  if (!payload?.issue) return null;
+  if (!payload?.issue) {return null;}
   const issue = payload.issue;
   return {
     number: issue.number,

@@ -31,10 +31,10 @@ export function detectFramework(workspacePath: string): TestFramework {
   }
 
   // Dependency-based detection
-  if (hasDependency(pkg, "vitest")) return "vitest";
-  if (hasDependency(pkg, "jest") || hasDependency(pkg, "@jest/globals")) return "jest";
+  if (hasDependency(pkg, "vitest")) {return "vitest";}
+  if (hasDependency(pkg, "jest") || hasDependency(pkg, "@jest/globals")) {return "jest";}
   if (hasDependency(pkg, "playwright") || hasDependency(pkg, "@playwright/test"))
-    return "playwright";
+    {return "playwright";}
 
   // Config file-based detection
   const jestConfigFiles = ["jest.config.js", "jest.config.ts", "jest.config.cjs", "jest.config.mjs"];

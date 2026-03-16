@@ -19,13 +19,13 @@ export function envString(name: string, fallback: string = ""): string {
 
 export function envBool(name: string, fallback: boolean = false): boolean {
   const raw = process.env[name]?.trim().toLowerCase();
-  if (raw === undefined || raw === "") return fallback;
+  if (raw === undefined || raw === "") {return fallback;}
   return raw === "true" || raw === "1";
 }
 
 export function envInt(name: string, fallback?: number): number | undefined {
   const raw = process.env[name]?.trim();
-  if (!raw) return fallback;
+  if (!raw) {return fallback;}
   const parsed = Number(raw);
   return Number.isNaN(parsed) ? fallback : parsed;
 }

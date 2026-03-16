@@ -411,7 +411,7 @@ async function ensureBranchExists(params: {
 }): Promise<void> {
   const { branchName, client, baseBranch, log } = params;
   const branchExists = await client.findBranch(branchName);
-  if (branchExists) return;
+  if (branchExists) {return;}
 
   const base = baseBranch || "main";
   let baseSHA: string;
@@ -438,7 +438,7 @@ async function maybeLabelPullRequest(params: {
   log: (step: string, msg: string) => void;
 }): Promise<void> {
   const { client, prNumber, log } = params;
-  if (!prNumber) return;
+  if (!prNumber) {return;}
 
   try {
     log("label", "Adding 'tests-generated' label");

@@ -70,7 +70,7 @@ export class GitHubClient {
       });
       return true;
     } catch (err: any) {
-      if (err?.status === 404) return false;
+      if (err?.status === 404) {return false;}
       throw err;
     }
   }
@@ -219,7 +219,7 @@ export class GitHubClient {
       return title.includes(`#${issueNumber}`);
     });
 
-    if (!match) return null;
+    if (!match) {return null;}
 
     return {
       url: match.html_url,
