@@ -40,7 +40,7 @@ Generate tests from a user story by scanning your TypeScript project. The extens
 5. On success, the test is saved to `__tests__/` and opened.
 
 ## Deploy
-Deploy the GitHub webhook to Vercel. The webhook server listens for GitHub issue label events and runs the full test generation pipeline. Deploy your own instance to Vercel with one click.
+Deploy the webhook handlers to Vercel. Both the GitHub and Linear webhook handlers run the full test generation pipeline. Deploy your own instance to Vercel with one click.
 
 [![Deploy with Vercel](https://vercel.com/button)](https://vercel.com/new/clone?repository-url=https%3A%2F%2Fgithub.com%2Fyashbhal%2Fstorytotest&env=GITHUB_TOKEN,GITHUB_OWNER,GITHUB_REPO,LLM_API_KEY,WEBHOOK_SECRET)
 
@@ -48,6 +48,17 @@ Required environment variables for the webhook:
 - `GITHUB_TOKEN`, `GITHUB_OWNER`, `GITHUB_REPO`
 - `LLM_API_KEY` (or provider-specific key: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`)
 - Optional overrides: `LLM_PROVIDER`, `LLM_MODEL`, `LLM_BASE_URL` (or provider-specific model/base URL vars), `WORKSPACE_ROOT`, `GITHUB_WEBHOOK_SECRET` (or `WEBHOOK_SECRET`), `DRY_RUN`, `ALLOW_SCAFFOLD_VITEST`, `BASE_BRANCH`, `TEST_OUTPUT_DIR`, `MAX_ATTEMPTS`
+
+### Linear Webhook
+The Linear webhook handler lives at `api/webhook/linear.ts` and triggers test generation when a Linear issue transitions to a configured state (default: `Done`).
+
+To wire it up:
+1. In your Linear workspace settings, add a webhook pointing to `https://<your-deployment>/api/webhook/linear` for **Issue** events.
+2. Copy the signing secret Linear provides and set it as `LINEAR_WEBHOOK_SECRET` in your Vercel environment variables.
+
+Additional Linear-specific env vars:
+- `LINEAR_WEBHOOK_SECRET`: HMAC signing secret from the Linear webhook settings page (recommended).
+- `LINEAR_TRIGGER_STATE`: Issue state name that triggers test generation (default: `Done`).
 
 ## Settings
 - `storytotest.apiKey`: API key for the selected provider.
