@@ -8,6 +8,15 @@ export { TestResult };
 
 const execAsync = promisify(exec);
 
+/**
+ * Executes a single test file with the detected framework.
+ * - Supports Vitest (`npx vitest run <file>`) and Jest (`npm test -- <file>`).
+ * - Uses `workspacePath` as cwd to respect repo-level configs; falls back to the test file directory.
+ * @param testFilePath absolute path to the generated test file
+ * @param framework detected test framework (vitest | jest | playwright | unknown)
+ * @param workspacePath workspace root; used as cwd when invoking the test runner
+ * @returns TestResult indicating pass/fail and captured error text on failure
+ */
 export async function runTest(
   testFilePath: string,
   framework: TestFramework,

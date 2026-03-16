@@ -5,7 +5,13 @@ import { InterfaceInfo, ClassInfo, CodebaseIndex } from "./types";
 
 export { InterfaceInfo, ClassInfo, CodebaseIndex };
 
-// main method that gets the classes, gets the interfaces, pushes them onto the interfaces and then gets everything ready to send
+/**
+ * Indexes a TypeScript workspace and extracts interface/class metadata for matching.
+ * - Loads tsconfig when present; otherwise uses a bare ts-morph project.
+ * - Scans .ts/.tsx files while excluding common generated/output directories.
+ * @param workspacePath absolute path to the repo/workspace root
+ * @returns arrays of interfaces and classes with names, file paths, properties/methods, and export flags
+ */
 export async function indexCodebase(
   workspacePath: string,
 ): Promise<CodebaseIndex> {

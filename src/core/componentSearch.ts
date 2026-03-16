@@ -2,6 +2,13 @@ import { CodebaseIndex, InterfaceInfo, ClassInfo, SearchResult } from "./types";
 
 export { SearchResult };
 
+/**
+ * Performs a simple substring match between parsed story entities and indexed interfaces/classes.
+ * Matching is case-insensitive and bidirectional (entity in name or name in entity).
+ * @param index codebase index containing interfaces/classes
+ * @param entities lowercased story entities extracted from the user story
+ * @returns matched interfaces and classes
+ */
 export function searchComponents(
   index: CodebaseIndex,
   entities: string[],
