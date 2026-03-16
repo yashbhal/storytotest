@@ -120,12 +120,16 @@ export default async function handler(
   const signature = Array.isArray(signatureHeader)
     ? signatureHeader[0]
     : signatureHeader;
-  const webhookSecret = process.env.WEBHOOK_SECRET;
+  const webhookSecret = envString("GITHUB_WEBHOOK_SECRET") || envString("WEBHOOK_SECRET");
 
-  if (!verifySignature(webhookSecret, rawBody, signature)) {
-    res.writeHead(401, { "Content-Type": "application/json" });
-    res.end(JSON.stringify({ message: "Invalid webhook signature" }));
-    return;
+  if (webhookSecret) {
+    if (!verifySignature(webhookSecret, rawBody, signature)) {
+      res.writeHead(401, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ message: "Invalid webhook signature" }));
+      return;
+    }
+  } else {
+    console.log("[webhook] GITHUB_WEBHOOK_SECRET/WEBHOOK_SECRET not set; skipping signature verification");
   }
 
   const { action, label, issue } = payload;
@@ -160,7 +164,7 @@ export default async function handler(
     ensureWorkspace(workspaceRoot, githubOwner, githubRepo, githubToken, issue.number as number);
   } catch (wsErr: any) {
     console.log(`[issue #${issue.number}][workspace] ${wsErr.message}`);
-    res.writeHead(500, { "Content-Type": "application/json" });
+    res.writeHead(200, { "Content-Type": "application/json" });
     res.end(JSON.stringify({ message: wsErr.message }));
     return;
   }

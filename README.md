@@ -47,7 +47,7 @@ Deploy the GitHub webhook to Vercel. The webhook server listens for GitHub issue
 Required environment variables for the webhook:
 - `GITHUB_TOKEN`, `GITHUB_OWNER`, `GITHUB_REPO`
 - `LLM_API_KEY` (or provider-specific key: `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `GEMINI_API_KEY`)
-- Optional overrides: `LLM_PROVIDER`, `LLM_MODEL`, `LLM_BASE_URL` (or provider-specific model/base URL vars), `WORKSPACE_ROOT`, `WEBHOOK_SECRET`, `DRY_RUN`, `ALLOW_SCAFFOLD_VITEST`, `BASE_BRANCH`, `TEST_OUTPUT_DIR`, `MAX_ATTEMPTS`
+- Optional overrides: `LLM_PROVIDER`, `LLM_MODEL`, `LLM_BASE_URL` (or provider-specific model/base URL vars), `WORKSPACE_ROOT`, `GITHUB_WEBHOOK_SECRET` (or `WEBHOOK_SECRET`), `DRY_RUN`, `ALLOW_SCAFFOLD_VITEST`, `BASE_BRANCH`, `TEST_OUTPUT_DIR`, `MAX_ATTEMPTS`
 
 ## Settings
 - `storytotest.apiKey`: API key for the selected provider.
