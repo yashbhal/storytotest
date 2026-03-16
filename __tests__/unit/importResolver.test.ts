@@ -30,7 +30,7 @@ describe("resolveImport", () => {
     const testDir = path.join("/repo", "src", "components");
     const result = resolveImport(baseInterface, testDir);
 
-    assert.equal(result, 'import { BlogCardProps } from "../BlogCard";');
+    assert.equal(result, 'import { BlogCardProps } from "./BlogCard";');
   });
 
   it("falls back to DefaultExport name when name is missing", () => {
